@@ -1584,15 +1584,17 @@ function unlockAudioOnce(){
   if(_audioUnlocked) return;
   _audioUnlocked = true;
   const ctx = getClickAudioCtx();
-  if(!ctx) return;
+  if(!ctx){ console.warn('[sound] no AudioContext available — browser has neither AudioContext nor webkitAudioContext, or construction threw'); return; }
+  console.log('[sound] unlockAudioOnce firing, ctx.state =', ctx.state);
   try {
-    if(ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if(ctx.state === 'suspended') ctx.resume().then(() => console.log('[sound] resume() resolved, ctx.state =', ctx.state)).catch((e) => console.warn('[sound] resume() rejected:', e));
     const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(ctx.destination);
     src.start(0);
-  } catch(e){}
+    console.log('[sound] unlock buffer started OK');
+  } catch(e){ console.warn('[sound] unlockAudioOnce threw:', e); }
 }
 document.addEventListener('click', unlockAudioOnce, { capture: true, once: true });
 document.addEventListener('touchstart', unlockAudioOnce, { capture: true, once: true });
@@ -1604,9 +1606,12 @@ document.addEventListener('keydown', unlockAudioOnce, { capture: true, once: tru
 // net for any edge case that slipped past it.
 function withAudioCtx(fn){
   const ctx = getClickAudioCtx();
-  if(!ctx) return;
-  if(ctx.state === 'suspended'){ ctx.resume().catch(() => {}); }
-  fn(ctx);
+  if(!ctx){ console.warn('[sound] withAudioCtx: no AudioContext'); return; }
+  if(ctx.state === 'suspended'){
+    console.log('[sound] withAudioCtx: ctx still suspended at play time, calling resume() as a safety net');
+    ctx.resume().catch((e) => console.warn('[sound] withAudioCtx resume() rejected:', e));
+  }
+  try { fn(ctx); } catch(e){ console.warn('[sound] sound-playing function threw:', e); }
 }
 function makeMasterGain(ctx, level){
   const g = ctx.createGain(); g.gain.value = level; g.connect(ctx.destination); return g;
