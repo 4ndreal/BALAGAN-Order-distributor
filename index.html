@@ -79,14 +79,13 @@
   @keyframes fadeIn { from{opacity:0} to{opacity:1} }
   @keyframes popIn { from{opacity:0; transform:translateY(6px) scale(.98)} to{opacity:1; transform:none} }
   @keyframes fadeSlideIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
-  /* Tab bar background is tinted with the current accent theme color at 45% transparency (55%
-     opaque) — color-mix() lets this read straight off --accent (which already changes per theme)
-     instead of hand-writing 10 rgba() overrides (5 themes x light/dark) that would drift out of
-     sync if --accent's hex values are ever tuned again. The plain var(--accent) line first is a
-     fallback for browsers without color-mix() support (older Safari) — an unsupported declaration
-     is ignored, leaving the last valid one, so this degrades to a solid accent tab bar instead of
-     silently losing the background entirely. */
-  .tabs { display:flex; background: var(--accent); background: color-mix(in srgb, var(--accent) 55%, transparent);
+  /* Tab bar background: a fixed neutral grey (not the per-theme --accent, so it reads the same
+     "grey" regardless of which of the 5 accent themes is active) at 45% transparency (55% opaque)
+     — same color-mix() + plain-color-fallback pattern as before, just swapping the color source.
+     The plain grey line first is a fallback for browsers without color-mix() support (older
+     Safari) — an unsupported declaration is ignored, leaving the last valid one, so this degrades
+     to a solid grey tab bar instead of silently losing the background entirely. */
+  .tabs { display:flex; background: #6b7280; background: color-mix(in srgb, #6b7280 55%, transparent);
           border-bottom:1px solid var(--tab-border); overflow-x:auto;
           position:sticky; top:0; z-index:1; box-shadow: var(--shadow-sm); padding-top:18px; }
   /* single "?" help button pinned to the right edge of the tab bar — shows whichever tab's
