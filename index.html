@@ -91,7 +91,6 @@
   .tabs-help .help-icon:hover, .tabs-help .help-wrap.open .help-icon { background:#31384a; }
   @keyframes helpBreathe { 0%,100% { transform:scale(1); } 50% { transform:scale(1.4); } }
   .tabs-help .help-icon:hover { animation: helpColorCycle 1s ease-in-out infinite alternate, helpBreathe 1.2s ease-in-out infinite; }
-  /* fixed-position popover's top/left are computed and set inline by positionHelpPopover() at open time */
   .tab { padding:13px 20px; cursor:pointer; font-size:14px; color:var(--tab-text); border-bottom:3px solid transparent;
          white-space:nowrap; transition: color .15s, background .15s, border-color .15s;
          transform-origin:center bottom; display:inline-block; }
@@ -276,19 +275,27 @@
   .flag strong { color: var(--flag-text); }
   .flag-green { background:var(--flag-green-bg); border-left-color:var(--accent); }
   /* "How it works" banners collapse into a small "?" icon — hover or click/tap to reveal the
-     full banner (same .flag styling), click again or click outside to dismiss.
-     The popover is position:fixed (not absolute) and JS-positioned on open (see positionHelpPopover)
-     — it used to be position:absolute inside .help-wrap, but .help-wrap sits inside .tabs, which
-     needs overflow-x:auto for horizontal tab scrolling on narrow screens; per the CSS overflow spec
-     that silently forces overflow-y:auto too, which was clipping the popover to the tab bar's own
-     short height so only a sliver of text was ever visible. Fixed position escapes that clipping. */
+     full banner (same .flag styling), click again, tap the backdrop, or click elsewhere to dismiss.
+     This used to be a position:fixed popover JS-positioned relative to the icon's own
+     getBoundingClientRect() — first bug: .help-wrap sits inside .tabs, which needs
+     overflow-x:auto for horizontal tab scrolling, and per the CSS overflow spec that silently
+     forces overflow-y:auto too, clipping an absolutely-positioned popover to the tab bar's own
+     short height. Switching to position:fixed dodged THAT clipping, but caused a second, worse
+     bug on iPad: fixed-position elements are pinned to the LAYOUT viewport, which can drift out of
+     sync with the VISUAL viewport during Safari's pinch-zoom/scroll-chrome behavior — so the
+     icon-anchored math could compute a position that's technically "on the page" but visually
+     off-screen. Both problems go away with a full-screen centered overlay (the same
+     .modal-overlay/.modal-box pattern already used for the custom alert/confirm/prompt dialogs)
+     instead of anchoring to the button at all — centering via flexbox on an inset:0 backdrop can't
+     drift off-screen the way icon-relative top/right math can. */
   .help-wrap { position:relative; display:inline-block; margin:0 0 16px; }
   .help-icon { width:22px; height:22px; border-radius:50%; border:1px solid var(--border); background:var(--surface);
     color:var(--text-dim); font-size:12px; font-weight:700; cursor:pointer; padding:0;
     display:inline-flex; align-items:center; justify-content:center; box-shadow:var(--shadow-sm); transition:background .15s, color .15s, border-color .15s; }
   .help-icon:hover, .help-wrap.open .help-icon { background:var(--accent-soft); color:var(--accent); border-color:var(--accent); }
-  .help-wrap .help-popover { display:none; position:fixed; z-index:1000; width:min(620px, 92vw); max-height:70vh; overflow-y:auto; margin:0; }
-  .help-wrap.hovering .help-popover, .help-wrap.open .help-popover { display:block; }
+  .help-popover-overlay { display:none; position:fixed; inset:0; z-index:1000; background:rgba(10,11,13,0.5); align-items:center; justify-content:center; padding:20px; box-sizing:border-box; }
+  .help-wrap.hovering .help-popover-overlay, .help-wrap.open .help-popover-overlay { display:flex; }
+  .help-wrap .help-popover { width:min(620px, 92vw); max-height:80vh; overflow-y:auto; margin:0; }
   .hint { font-size:12px; color:var(--text-dim); margin-top:6px; background:var(--surface); padding:7px 11px; border-radius:var(--radius-sm); box-shadow:var(--shadow-sm); display:inline-block; max-width:100%; box-sizing:border-box; }
   #matrixGrid { margin-top:16px; }
   #matrixGrid .gridjs-table td, #matrixGrid .gridjs-table th { padding:4px 8px !important; font-size:11px !important; line-height:1.35; }
@@ -469,22 +476,28 @@
   <div class="tab" data-view="matrix">Supplier Matrix</div>
   <div class="tab" data-view="edit">Edit Matrix</div>
   <div class="tabs-help">
-    <div class="help-wrap help-right" data-for-view="builder" id="hiw-builder">
+    <div class="help-wrap" data-for-view="builder" id="hiw-builder">
       <button class="help-icon" type="button" onclick="toggleHelp('hiw-builder')" aria-label="How it works">?</button>
-      <div class="flag help-popover">
-        <strong>How it works:</strong> Paste your order list below (one item per line, English or Indonesian — e.g. "Baby Potato 1 kg" or "Kentang Baby 1 kg"), pick Kitchen or Bar, then click Distribute. Kitchen items route by cheapest active supplier plus every standing rule (named-supplier locks, pantry→Mimba, thresholds). Bar produce goes to a single cheapest full-coverage supplier (Buk Bunga is backup-only). Anything unmatched lands in a clearly flagged Undistributed pool at the bottom — assign it yourself with the dropdown before copying.
+      <div class="help-popover-overlay">
+        <div class="flag help-popover">
+          <strong>How it works:</strong> Paste your order list below (one item per line, English or Indonesian — e.g. "Baby Potato 1 kg" or "Kentang Baby 1 kg"), pick Kitchen or Bar, then click Distribute. Kitchen items route by cheapest active supplier plus every standing rule (named-supplier locks, pantry→Mimba, thresholds). Bar produce goes to a single cheapest full-coverage supplier (Buk Bunga is backup-only). Anything unmatched lands in a clearly flagged Undistributed pool at the bottom — assign it yourself with the dropdown before copying.
+        </div>
       </div>
     </div>
-    <div class="help-wrap help-right" data-for-view="prices" id="hiw-prices" style="display:none">
+    <div class="help-wrap" data-for-view="prices" id="hiw-prices" style="display:none">
       <button class="help-icon" type="button" onclick="toggleHelp('hiw-prices')" aria-label="How it works">?</button>
-      <div class="flag help-popover">
-        <strong>How it works:</strong> Paste a price list from your tracking tool — the same "PRODUCT / LAST PRICE / DATE / QTY / AMOUNT / DELIVERIES" table you'd paste in chat. Pick which supplier those prices are for, click Preview, review the matches (fix any low-confidence ones or uncheck them), then Apply. Updates save to this browser — download the updated site afterward to make them official everywhere.
+      <div class="help-popover-overlay">
+        <div class="flag help-popover">
+          <strong>How it works:</strong> Paste a price list from your tracking tool — the same "PRODUCT / LAST PRICE / DATE / QTY / AMOUNT / DELIVERIES" table you'd paste in chat. Pick which supplier those prices are for, click Preview, review the matches (fix any low-confidence ones or uncheck them), then Apply. Updates save to this browser — download the updated site afterward to make them official everywhere.
+        </div>
       </div>
     </div>
-    <div class="help-wrap help-right" data-for-view="suppliers" id="hiw-suppliers" style="display:none">
+    <div class="help-wrap" data-for-view="suppliers" id="hiw-suppliers" style="display:none">
       <button class="help-icon" type="button" onclick="toggleHelp('hiw-suppliers')" aria-label="How it works">?</button>
-      <div class="flag help-popover">
-        <strong>How it works:</strong> Turn a supplier off and it's skipped everywhere (cheapest-active comparisons, the bar one-supplier rule, named-supplier locks) — the same as SM/Wika/MKS/MKU/Agus being disabled today. Set a minimum order and if that supplier's running total falls under it, its items get redistributed to the next-cheapest active supplier automatically (same logic as the existing TJ 400k / BB,SJ,Sarining 200k rule — now editable instead of hardcoded). Changes apply immediately to this browser; download the updated site from the Edit Matrix tab to make them official everywhere.
+      <div class="help-popover-overlay">
+        <div class="flag help-popover">
+          <strong>How it works:</strong> Turn a supplier off and it's skipped everywhere (cheapest-active comparisons, the bar one-supplier rule, named-supplier locks) — the same as SM/Wika/MKS/MKU/Agus being disabled today. Set a minimum order and if that supplier's running total falls under it, its items get redistributed to the next-cheapest active supplier automatically (same logic as the existing TJ 400k / BB,SJ,Sarining 200k rule — now editable instead of hardcoded). Changes apply immediately to this browser; download the updated site from the Edit Matrix tab to make them official everywhere.
+        </div>
       </div>
     </div>
   </div>
@@ -890,47 +903,31 @@ function norm(s){ return (s||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").replac
 function escapeHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 // Click/tap the "?" icon to pin a collapsed "How it works" banner open (hover alone already
-// reveals it via CSS, for mouse users) — click again or click anywhere outside to close it.
-// The popover is position:fixed (see CSS comment above .help-wrap), so its on-screen position has
-// to be computed from the "?" icon's actual location each time it opens, rather than being a fixed
-// CSS offset — this also means it always fits fully on screen instead of being clipped by .tabs'
-// required overflow-x:auto (that clipping was the original bug report this replaced).
-function positionHelpPopover(wrap){
-  const icon = wrap.querySelector('.help-icon');
-  const pop = wrap.querySelector('.help-popover');
-  if(!icon || !pop) return;
-  const r = icon.getBoundingClientRect();
-  const margin = 8;
-  pop.style.top = Math.round(r.bottom + 6) + "px";
-  // right-align under the icon by default, but clamp so it never runs off either screen edge
-  let right = Math.max(margin, window.innerWidth - r.right);
-  pop.style.left = "auto";
-  pop.style.right = right + "px";
-}
+// reveals it via CSS, for mouse users) as a centered full-screen overlay — click again, tap the
+// dim backdrop, or click anywhere outside the whole .help-wrap to close it. No position math
+// needed anymore (see the CSS comment above .help-popover-overlay for why the old icon-anchored
+// approach was fragile on mobile Safari).
 function toggleHelp(id){
   const el = document.getElementById(id);
   if(!el) return;
   const wasOpen = el.classList.contains('open');
   document.querySelectorAll('.help-wrap.open').forEach(w => w.classList.remove('open'));
-  if(!wasOpen){
-    positionHelpPopover(el);
-    el.classList.add('open');
-  }
+  if(!wasOpen) el.classList.add('open');
 }
 document.addEventListener('click', (e) => {
   if(!e.target.closest('.help-wrap')){
     document.querySelectorAll('.help-wrap.open').forEach(w => w.classList.remove('open'));
+    return;
+  }
+  // tapping the dim backdrop itself (not the inner text box) closes it too
+  if(e.target.classList.contains('help-popover-overlay')){
+    e.target.closest('.help-wrap').classList.remove('open');
   }
 });
 document.querySelectorAll('.help-wrap').forEach(w => {
-  w.addEventListener('mouseenter', () => { positionHelpPopover(w); w.classList.add('hovering'); });
+  w.addEventListener('mouseenter', () => w.classList.add('hovering'));
   w.addEventListener('mouseleave', () => w.classList.remove('hovering'));
 });
-// scrolling can move the "?" icon (e.g. before the sticky tab bar has stuck to the top), so close
-// any open/hovering popover rather than leave it floating in the wrong spot.
-window.addEventListener('scroll', () => {
-  document.querySelectorAll('.help-wrap.open, .help-wrap.hovering').forEach(w => w.classList.remove('open','hovering'));
-}, { passive:true });
 
 /* ===================== CUSTOM DIALOGS (dark-mode aware alert/confirm/prompt) ===================== */
 // Native window.alert/confirm/prompt always render with the browser's own light chrome and cannot
