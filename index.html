@@ -9,7 +9,7 @@
     color-scheme: light;
     --bg:#f2f3f5; --text:#1e2126; --text-dim:#5b6169; --text-faint:#8b9198;
     --header-bg:#14161a; --header-bg2:#20242b; --header-text:#fff; --header-dim:#a8adb5;
-    --surface:#fff; --border:#dfe2e6; --border-light:#eef0f2; --border-lighter:#f4f5f7;
+    --surface:#fff; --surface-input:#fff; --border:#dfe2e6; --border-light:#eef0f2; --border-lighter:#f4f5f7;
     --tab-border:#e4e6e9; --tab-text:#5b6169; --tab-active:#14161a; --tab-hover:#f4f5f7;
     --accent:#25D366; --accent-active:#1da851; --accent-soft:#e8f8ee; --accent-ring:rgba(37,211,102,0.25);
     --btn2-bg:#eef0f2; --btn2-text:#3a3f47; --btn2-hover:#e4e7ea;
@@ -27,7 +27,7 @@
     color-scheme: dark;
     --bg:#101215; --text:#e9eaec; --text-dim:#b2b7bd; --text-faint:#82878e;
     --header-bg:#0a0b0d; --header-bg2:#16181c; --header-text:#f2f2f2; --header-dim:#9a9fa6;
-    --surface:#1a1c20; --border:#33363b; --border-light:#26282c; --border-lighter:#232529;
+    --surface:#1a1c20; --surface-input:#1a1c20; --border:#33363b; --border-light:#26282c; --border-lighter:#232529;
     --tab-border:#26282c; --tab-text:#a9adb3; --tab-active:#fff; --tab-hover:#212327;
     --accent:#2fdc78; --accent-active:#25b862; --accent-soft:#153322; --accent-ring:rgba(47,220,120,0.3);
     --btn2-bg:#212327; --btn2-text:#e9eaec; --btn2-hover:#2a2d31;
@@ -45,10 +45,14 @@
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
          background: var(--bg); margin: 0; padding: 0; color:var(--text); -webkit-font-smoothing:antialiased; }
   header { background: linear-gradient(135deg, var(--header-bg), var(--header-bg2)); color:var(--header-text);
-           padding:18px 22px; box-shadow: var(--shadow-sm); position:relative; z-index:2; }
-  header h1 { margin:0; font-size:19px; font-weight:700; letter-spacing:-0.2px; }
+           padding:9px 22px; box-shadow: var(--shadow-sm); position:relative; z-index:2; transition:background .15s; }
+  header h1 { margin:0; font-size:15px; font-weight:700; letter-spacing:-0.2px; }
   header h1:before { content:"🧺 "; }
-  header p { margin:5px 0 0; font-size:12.5px; color:var(--header-dim); }
+  header p { margin:2px 0 0; font-size:11px; color:var(--header-dim); }
+  /* header becomes translucent too once a theme background art is active, so it doesn't sit as a
+     heavy opaque bar over the artwork — kept solid (the readable default) when no scene is set. */
+  body[data-bg]:not([data-bg="none"]) header { background: linear-gradient(135deg, rgba(20,22,26,0.55), rgba(32,36,43,0.55)); }
+  body.dark[data-bg]:not([data-bg="none"]) header { background: linear-gradient(135deg, rgba(10,11,13,0.55), rgba(22,24,28,0.55)); }
   /* custom dialogs — replace native alert/confirm/prompt, which the browser always renders with
      its own light-themed chrome and can't be restyled, so dark mode would otherwise flash white */
   .modal-overlay { position:fixed; inset:0; background:rgba(10,11,13,0.55); backdrop-filter:blur(2px);
@@ -77,6 +81,13 @@
   @keyframes fadeSlideIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
   .tabs { display:flex; background:var(--surface); border-bottom:1px solid var(--tab-border); overflow-x:auto;
           position:sticky; top:0; z-index:1; box-shadow: var(--shadow-sm); }
+  /* single "?" help button pinned to the right edge of the tab bar — shows whichever tab's
+     "How it works" content matches the currently active view (toggled by the tab click handler). */
+  .tabs-help { margin-left:auto; display:flex; align-items:center; padding-right:14px; flex:none; }
+  .tabs-help .help-icon { width:32px; height:32px; font-size:20px; font-weight:400; color:#f97316;
+    background:#20242b; border:2px solid #f97316; }
+  .tabs-help .help-icon:hover, .tabs-help .help-wrap.open .help-icon { background:#31384a; }
+  /* fixed-position popover's top/left are computed and set inline by positionHelpPopover() at open time */
   .tab { padding:13px 20px; cursor:pointer; font-size:14px; color:var(--tab-text); border-bottom:3px solid transparent;
          white-space:nowrap; transition: color .15s, background .15s, border-color .15s; }
   .tab:hover { color:var(--tab-active); background:var(--tab-hover); transform:scale(1.04); }
@@ -86,11 +97,11 @@
   .view.active { display:block; }
   textarea { width:100%; min-height:220px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
              font-size:14px; padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius-sm);
-             resize:vertical; background:var(--surface); color:var(--text); transition:border-color .15s, box-shadow .15s; }
+             resize:vertical; background:var(--surface-input); color:var(--text); transition:border-color .15s, box-shadow .15s; }
   textarea:focus, select:focus, input[type=text]:focus, input[type=number]:focus {
     outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-ring); }
   select, input[type=text], input[type=number] { font-size:13px; padding:7px 9px; border:1px solid var(--border);
-    border-radius:var(--radius-sm); background:var(--surface); color:var(--text); transition:border-color .15s, box-shadow .15s; }
+    border-radius:var(--radius-sm); background:var(--surface-input); color:var(--text); transition:border-color .15s, box-shadow .15s; }
   button { cursor:pointer; font-family:inherit; }
   /* Type-to-search supplier picker: a visible text input + dropdown menu, backed by a hidden
      input holding the actual supplier code. Native <select> was silently defaulting to the
@@ -120,7 +131,7 @@
   .import-drop-zone { border:2px dashed var(--border); border-radius:10px; padding:22px; text-align:center; color:var(--text-dim); cursor:pointer; margin:10px 0; transition:border-color .15s, background .15s; background:var(--surface); }
   .import-drop-zone:hover, .import-drop-zone.dragover { border-color:var(--accent); background:var(--accent-soft); }
   .import-drop-icon { font-size:22px; margin-bottom:4px; }
-  .import-textarea { width:100%; min-height:110px; font-family:Consolas,Menlo,monospace; font-size:12px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); margin-bottom:8px; box-sizing:border-box; }
+  .import-textarea { width:100%; min-height:110px; font-family:Consolas,Menlo,monospace; font-size:12px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface-input); color:var(--text); margin-bottom:8px; box-sizing:border-box; }
   .pack-converted-badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px;
     font-size:10px; font-weight:600; letter-spacing:.2px; cursor:help;
     color:#a86200; background:#fff3d9; }
@@ -151,7 +162,20 @@
                 border-radius:var(--radius-sm); padding:7px 14px; font-size:13px; transition: filter .15s, transform .12s; }
   .btn-danger:hover { filter:brightness(0.95); transform:scale(1.05); }
   .field-row { display:flex; gap:16px; align-items:center; margin:10px 0; flex-wrap:wrap; background:var(--surface); padding:10px 14px; border-radius:var(--radius-sm); box-shadow:var(--shadow-sm); }
-  .field-row label { font-size:13px; color:var(--text-dim); }
+  .field-row label { font-size:17px; color:var(--text-dim); display:inline-flex; align-items:center; gap:6px; }
+  /* Kitchen/Bar order-type toggle: red for Kitchen, blue for Bar — the dot itself only lights up
+     bigger+glowing once that option is actually selected (native radio semantics), while the
+     label text glows and gently "breathes" all the time so both options stay easy to tell apart. */
+  .field-row input[name="orderType"] { width:17px; height:17px; cursor:pointer; transition:transform .15s; }
+  .field-row input[name="orderType"][value="Kitchen"] { accent-color:#ff3b3b; }
+  .field-row input[name="orderType"][value="Bar"] { accent-color:#3b82f6; }
+  .field-row input[name="orderType"]:checked { transform:scale(1.5); }
+  .field-row input[name="orderType"][value="Kitchen"]:checked { filter:drop-shadow(0 0 7px #ff3b3b); }
+  .field-row input[name="orderType"][value="Bar"]:checked { filter:drop-shadow(0 0 7px #3b82f6); }
+  @keyframes breatheRed { 0%,100% { text-shadow:0 0 4px rgba(255,59,59,0.55); } 50% { text-shadow:0 0 15px rgba(255,59,59,0.95); } }
+  @keyframes breatheBlue { 0%,100% { text-shadow:0 0 4px rgba(59,130,246,0.55); } 50% { text-shadow:0 0 15px rgba(59,130,246,0.95); } }
+  .field-row label.radio-kitchen { color:#ff3b3b; font-weight:600; animation:breatheRed 1.8s ease-in-out infinite; }
+  .field-row label.radio-bar { color:#3b82f6; font-weight:600; animation:breatheBlue 1.8s ease-in-out infinite; }
   .parsed-table { width:auto; max-width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; background:var(--surface);
                   border-radius:var(--radius-sm); overflow:hidden; box-shadow:var(--shadow-sm); }
   .parsed-table th, .parsed-table td { padding:7px 10px; border-bottom:1px solid var(--border-light); text-align:left; white-space:nowrap; }
@@ -211,10 +235,26 @@
           box-shadow: var(--shadow-sm); }
   .flag strong { color: var(--flag-text); }
   .flag-green { background:var(--flag-green-bg); border-left-color:var(--accent); }
+  /* "How it works" banners collapse into a small "?" icon — hover or click/tap to reveal the
+     full banner (same .flag styling), click again or click outside to dismiss.
+     The popover is position:fixed (not absolute) and JS-positioned on open (see positionHelpPopover)
+     — it used to be position:absolute inside .help-wrap, but .help-wrap sits inside .tabs, which
+     needs overflow-x:auto for horizontal tab scrolling on narrow screens; per the CSS overflow spec
+     that silently forces overflow-y:auto too, which was clipping the popover to the tab bar's own
+     short height so only a sliver of text was ever visible. Fixed position escapes that clipping. */
+  .help-wrap { position:relative; display:inline-block; margin:0 0 16px; }
+  .help-icon { width:22px; height:22px; border-radius:50%; border:1px solid var(--border); background:var(--surface);
+    color:var(--text-dim); font-size:12px; font-weight:700; cursor:pointer; padding:0;
+    display:inline-flex; align-items:center; justify-content:center; box-shadow:var(--shadow-sm); transition:background .15s, color .15s, border-color .15s; }
+  .help-icon:hover, .help-wrap.open .help-icon { background:var(--accent-soft); color:var(--accent); border-color:var(--accent); }
+  .help-wrap .help-popover { display:none; position:fixed; z-index:1000; width:min(620px, 92vw); max-height:70vh; overflow-y:auto; margin:0; }
+  .help-wrap.hovering .help-popover, .help-wrap.open .help-popover { display:block; }
   .hint { font-size:12px; color:var(--text-dim); margin-top:6px; background:var(--surface); padding:7px 11px; border-radius:var(--radius-sm); box-shadow:var(--shadow-sm); display:inline-block; max-width:100%; box-sizing:border-box; }
   #matrixGrid { margin-top:16px; }
   #matrixGrid .gridjs-table td, #matrixGrid .gridjs-table th { padding:4px 8px !important; font-size:11px !important; line-height:1.35; }
-  #matrixGrid .gridjs-th-content { font-size:11px !important; }
+  #matrixGrid .gridjs-th-content { font-size:11px !important; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    max-width:calc(100% - 14px); display:inline-block; vertical-align:middle; cursor:help; }
+  #matrixGrid th.gridjs-th { padding-right:16px !important; }
   #matrixGrid .notes-cell { display:block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:help; }
   #matrixGrid .gridjs-search-input { font-size:12px; padding:4px 8px; }
   #matrixGrid .gridjs-pagination { font-size:11px; }
@@ -245,7 +285,7 @@
   body.dark #matrixGrid button.gridjs-sort-neutral, body.dark #matrixGrid button.gridjs-sort-asc, body.dark #matrixGrid button.gridjs-sort-desc { filter: invert(1) brightness(1.6); opacity:.45; }
   .footer-note { font-size:11px; color:var(--text-faint); margin-top:30px; text-align:center; }
   .edit-search { width:100%; padding:10px 12px; font-size:14px; border:1px solid var(--border); border-radius:var(--radius-sm);
-                 background:var(--surface); color:var(--text); transition:border-color .15s, box-shadow .15s; }
+                 background:var(--surface-input); color:var(--text); transition:border-color .15s, box-shadow .15s; }
   .edit-results { margin-top:10px; max-height:260px; overflow-y:auto; background:var(--surface); border-radius:var(--radius-sm); border:1px solid var(--border-light); }
   .edit-result-row { padding:8px 12px; border-bottom:1px solid var(--border-lighter); cursor:pointer; font-size:13px; transition:background .1s; }
   .edit-result-row:hover { background:var(--row-hover); }
@@ -346,8 +386,8 @@
      background from var(--surface)/var(--table-head-bg), so overriding those two variables to
      translucent rgba() here is enough to make the whole app "a bit transparent" everywhere at
      once, no per-component changes needed. Left fully opaque when no scene is selected. */
-  body[data-bg]:not([data-bg="none"]) { --surface: rgba(255,255,255,0.92); --table-head-bg: rgba(247,248,250,0.89); }
-  body.dark[data-bg]:not([data-bg="none"]) { --surface: rgba(26,28,32,0.90); --table-head-bg: rgba(31,34,38,0.87); }
+  body[data-bg]:not([data-bg="none"]) { --surface: rgba(255,255,255,0.92); --table-head-bg: rgba(247,248,250,0.89); --surface-input: rgba(255,255,255,0.55); }
+  body.dark[data-bg]:not([data-bg="none"]) { --surface: rgba(26,28,32,0.90); --table-head-bg: rgba(31,34,38,0.87); --surface-input: rgba(26,28,32,0.55); }
   ::-webkit-scrollbar { width:10px; height:10px; }
   ::-webkit-scrollbar-track { background:transparent; }
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:8px; }
@@ -375,16 +415,33 @@
   <div class="tab" data-view="suppliers">Suppliers</div>
   <div class="tab" data-view="matrix">Supplier Matrix</div>
   <div class="tab" data-view="edit">Edit Matrix</div>
+  <div class="tabs-help">
+    <div class="help-wrap help-right" data-for-view="builder" id="hiw-builder">
+      <button class="help-icon" type="button" onclick="toggleHelp('hiw-builder')" aria-label="How it works">?</button>
+      <div class="flag help-popover">
+        <strong>How it works:</strong> Paste your order list below (one item per line, English or Indonesian — e.g. "Baby Potato 1 kg" or "Kentang Baby 1 kg"), pick Kitchen or Bar, then click Distribute. Kitchen items route by cheapest active supplier plus every standing rule (named-supplier locks, pantry→Mimba, thresholds). Bar produce goes to a single cheapest full-coverage supplier (Buk Bunga is backup-only). Anything unmatched lands in a clearly flagged Undistributed pool at the bottom — assign it yourself with the dropdown before copying.
+      </div>
+    </div>
+    <div class="help-wrap help-right" data-for-view="prices" id="hiw-prices" style="display:none">
+      <button class="help-icon" type="button" onclick="toggleHelp('hiw-prices')" aria-label="How it works">?</button>
+      <div class="flag help-popover">
+        <strong>How it works:</strong> Paste a price list from your tracking tool — the same "PRODUCT / LAST PRICE / DATE / QTY / AMOUNT / DELIVERIES" table you'd paste in chat. Pick which supplier those prices are for, click Preview, review the matches (fix any low-confidence ones or uncheck them), then Apply. Updates save to this browser — download the updated site afterward to make them official everywhere.
+      </div>
+    </div>
+    <div class="help-wrap help-right" data-for-view="suppliers" id="hiw-suppliers" style="display:none">
+      <button class="help-icon" type="button" onclick="toggleHelp('hiw-suppliers')" aria-label="How it works">?</button>
+      <div class="flag help-popover">
+        <strong>How it works:</strong> Turn a supplier off and it's skipped everywhere (cheapest-active comparisons, the bar one-supplier rule, named-supplier locks) — the same as SM/Wika/MKS/MKU/Agus being disabled today. Set a minimum order and if that supplier's running total falls under it, its items get redistributed to the next-cheapest active supplier automatically (same logic as the existing TJ 400k / BB,SJ,Sarining 200k rule — now editable instead of hardcoded). Changes apply immediately to this browser; download the updated site from the Edit Matrix tab to make them official everywhere.
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="view active" id="view-builder">
-  <div class="flag">
-    <strong>How it works:</strong> Paste your order list below (one item per line, English or Indonesian — e.g. "Baby Potato 1 kg" or "Kentang Baby 1 kg"), pick Kitchen or Bar, then click Distribute. Kitchen items route by cheapest active supplier plus every standing rule (named-supplier locks, pantry→Mimba, thresholds). Bar produce goes to a single cheapest full-coverage supplier (Buk Bunga is backup-only). Anything unmatched lands in a clearly flagged Undistributed pool at the bottom — assign it yourself with the dropdown before copying.
-  </div>
-
+  
   <div class="field-row">
-    <label><input type="radio" name="orderType" value="Kitchen" checked> Kitchen</label>
-    <label><input type="radio" name="orderType" value="Bar"> Bar</label>
+    <label class="radio-kitchen"><input type="radio" name="orderType" value="Kitchen" checked> Kitchen</label>
+    <label class="radio-bar"><input type="radio" name="orderType" value="Bar"> Bar</label>
     <label>Date: <input type="text" id="orderDate" style="width:160px"></label>
   </div>
 
@@ -399,10 +456,7 @@
 </div>
 
 <div class="view" id="view-prices">
-  <div class="flag">
-    <strong>How it works:</strong> Paste a price list from your tracking tool — the same "PRODUCT / LAST PRICE / DATE / QTY / AMOUNT / DELIVERIES" table you'd paste in chat. Pick which supplier those prices are for, click Preview, review the matches (fix any low-confidence ones or uncheck them), then Apply. Updates save to this browser — download the updated site afterward to make them official everywhere.
-  </div>
-  <div class="field-row">
+    <div class="field-row">
     <label>Supplier these prices are for:
       <div class="supplier-combo">
         <input type="text" class="supplier-combo-input" id="priceListSupplierSearch" placeholder="Type to search supplier…" autocomplete="off">
@@ -433,10 +487,7 @@
 </div>
 
 <div class="view" id="view-suppliers">
-  <div class="flag">
-    <strong>How it works:</strong> Turn a supplier off and it's skipped everywhere (cheapest-active comparisons, the bar one-supplier rule, named-supplier locks) — the same as SM/Wika/MKS/MKU/Agus being disabled today. Set a minimum order and if that supplier's running total falls under it, its items get redistributed to the next-cheapest active supplier automatically (same logic as the existing TJ 400k / BB,SJ,Sarining 200k rule — now editable instead of hardcoded). Changes apply immediately to this browser; download the updated site from the Edit Matrix tab to make them official everywhere.
-  </div>
-  <input class="edit-search" id="supplierSearch" type="text" placeholder="Search supplier name…" oninput="renderSupplierManager()" style="margin-bottom:12px;">
+    <input class="edit-search" id="supplierSearch" type="text" placeholder="Search supplier name…" oninput="renderSupplierManager()" style="margin-bottom:12px;">
   <div id="supplierManager"></div>
 </div>
 
@@ -462,6 +513,15 @@
     <textarea id="matrixDeleteInput" style="min-height:90px" placeholder="Cream cheese (Anchor) / kg&#10;Baby Potato&#10;Green Lettuce&#10;..."></textarea>
     <div><button class="btn-secondary" onclick="previewBulkDelete()">Preview</button></div>
     <div id="matrixDeletePreview" style="margin-top:12px"></div>
+  </div>
+
+  <div class="field-row" style="margin-bottom:6px">
+    <label style="display:flex; align-items:center; gap:8px">Supplier name column width:
+      <button class="btn-secondary" style="padding:2px 10px" onclick="adjustNamedSupplierColWidth(-40)" title="Narrow">−</button>
+      <span id="namedSupplierColWidthLabel" style="min-width:44px; text-align:center; font-variant-numeric:tabular-nums">230px</span>
+      <button class="btn-secondary" style="padding:2px 10px" onclick="adjustNamedSupplierColWidth(40)" title="Widen">+</button>
+      <button class="btn-secondary" style="padding:2px 10px" onclick="resetNamedSupplierColWidth()" title="Back to default">Reset</button>
+    </label>
   </div>
 
   <div id="matrixGrid"></div>
@@ -556,6 +616,23 @@ function getMinOrder(code){
 function setSupplierConfig(code, patch){
   supplierState[code] = Object.assign({}, supplierState[code]||{}, patch);
   saveSupplierState(supplierState);
+}
+// The date-exception two-number-box row is now collapsed behind a per-supplier button by default
+// (it used to always render for all 30+ suppliers, which made the Suppliers table noticeably
+// taller — especially cramped on an iPad-width screen — even though almost nobody uses it).
+// Suppliers with an exception already configured (e.g. Tegal Jaya) stay expanded automatically;
+// this Set only needs to track ones a user expands by hand mid-session.
+let expandedExceptionRows = new Set();
+function toggleExceptionRow(code){
+  if(expandedExceptionRows.has(code)) expandedExceptionRows.delete(code);
+  else expandedExceptionRows.add(code);
+  renderSupplierManager();
+}
+function removeSupplierMinOrderException(code){
+  setSupplierConfig(code, { minOrderExceptionStart: null, minOrderExceptionEnd: null });
+  expandedExceptionRows.delete(code);
+  renderSupplierManager();
+  if(currentItems && currentItems.length) distribute();
 }
 // Backward-compat shim: anywhere old code checked `DISABLED.includes(x)`, use isDisabled(x) instead.
 const DISABLED = { includes: (code) => isDisabled(code) };
@@ -751,6 +828,49 @@ if(Object.keys(overrides).length){
 /* ===================== MATCHING (bilingual) ===================== */
 function norm(s){ return (s||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim(); }
 function escapeHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+// Click/tap the "?" icon to pin a collapsed "How it works" banner open (hover alone already
+// reveals it via CSS, for mouse users) — click again or click anywhere outside to close it.
+// The popover is position:fixed (see CSS comment above .help-wrap), so its on-screen position has
+// to be computed from the "?" icon's actual location each time it opens, rather than being a fixed
+// CSS offset — this also means it always fits fully on screen instead of being clipped by .tabs'
+// required overflow-x:auto (that clipping was the original bug report this replaced).
+function positionHelpPopover(wrap){
+  const icon = wrap.querySelector('.help-icon');
+  const pop = wrap.querySelector('.help-popover');
+  if(!icon || !pop) return;
+  const r = icon.getBoundingClientRect();
+  const margin = 8;
+  pop.style.top = Math.round(r.bottom + 6) + "px";
+  // right-align under the icon by default, but clamp so it never runs off either screen edge
+  let right = Math.max(margin, window.innerWidth - r.right);
+  pop.style.left = "auto";
+  pop.style.right = right + "px";
+}
+function toggleHelp(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const wasOpen = el.classList.contains('open');
+  document.querySelectorAll('.help-wrap.open').forEach(w => w.classList.remove('open'));
+  if(!wasOpen){
+    positionHelpPopover(el);
+    el.classList.add('open');
+  }
+}
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('.help-wrap')){
+    document.querySelectorAll('.help-wrap.open').forEach(w => w.classList.remove('open'));
+  }
+});
+document.querySelectorAll('.help-wrap').forEach(w => {
+  w.addEventListener('mouseenter', () => { positionHelpPopover(w); w.classList.add('hovering'); });
+  w.addEventListener('mouseleave', () => w.classList.remove('hovering'));
+});
+// scrolling can move the "?" icon (e.g. before the sticky tab bar has stuck to the top), so close
+// any open/hovering popover rather than leave it floating in the wrong spot.
+window.addEventListener('scroll', () => {
+  document.querySelectorAll('.help-wrap.open, .help-wrap.hovering').forEach(w => w.classList.remove('open','hovering'));
+}, { passive:true });
 
 /* ===================== CUSTOM DIALOGS (dark-mode aware alert/confirm/prompt) ===================== */
 // Native window.alert/confirm/prompt always render with the browser's own light chrome and cannot
@@ -1206,6 +1326,11 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
   document.getElementById('view-'+t.dataset.view).classList.add('active');
+  // show whichever tab-bar "?" help popover (if any) matches the newly active tab
+  document.querySelectorAll('.tabs-help .help-wrap').forEach(w => {
+    w.classList.remove('open');
+    w.style.display = (w.dataset.forView === t.dataset.view) ? '' : 'none';
+  });
 }));
 
 /* ===================== DARK MODE ===================== */
@@ -1284,6 +1409,8 @@ function renderSupplierManager(){
     const active = !isDisabled(code);
     const min = getMinOrderBase(code);
     const exc = getMinOrderException(code) || {};
+    const hasExc = !!(exc.start || exc.end);
+    const excExpanded = hasExc || expandedExceptionRows.has(code);
     const waivedNow = isMinOrderWaivedToday(code);
     const isCustom = customSuppliers[code] && customSuppliers[code].added;
     const batch = priceBatches[code];
@@ -1301,13 +1428,16 @@ function renderSupplierManager(){
       <td><label class="switch"><input type="checkbox" ${active?"checked":""} onchange="onSupplierToggle('${code}', this.checked)"><span class="switch-slider"></span></label></td>
       <td><input type="number" class="min-order-input" value="${min}" step="10000" onchange="onSupplierMinOrder('${code}', this.value)"></td>
       <td class="min-order-exception-cell">
+        ${excExpanded ? `
         <div class="min-order-exception-row">
           <span class="hint">no minimum, day</span>
           <input type="number" class="min-order-exc-input" min="1" max="31" value="${exc.start||''}" placeholder="1" onchange="onSupplierMinOrderException('${code}', this.value, null)">
           <span class="hint">to</span>
           <input type="number" class="min-order-exc-input" min="1" max="31" value="${exc.end||''}" placeholder="7" onchange="onSupplierMinOrderException('${code}', null, this.value)">
           ${waivedNow ? '<span class="tag" style="background:var(--flag-green-bg);color:var(--accent)">waived today</span>' : ''}
-        </div>
+          <button class="btn-secondary" style="padding:2px 8px" onclick="removeSupplierMinOrderException('${code}')" title="Remove this date exception">✕</button>
+        </div>` : `
+        <button class="btn-secondary" style="padding:3px 10px" onclick="toggleExceptionRow('${code}')">+ No-minimum date window</button>`}
       </td>
       <td>${undoCell}</td>
       <td><button class="btn-danger" onclick="onSupplierDelete('${code}')">Delete</button></td>
@@ -1467,15 +1597,73 @@ renderMatrixDeleteSupplierOptions();
 
 /* ===================== MATRIX GRID ===================== */
 let gridInstance = null;
+// Every named/off-matrix supplier (Rafi Seafood, AD, Prima Pangan, Mandala Kriya Utama, etc.) that
+// has a recorded price for this row — the old "Named supplier" column only ever showed the single
+// `hint` (routing default), so a real quote sitting in row.off for a supplier that ISN'T the hint
+// (e.g. Rafi's price on Mahi-Mahi/Salmon Fillet/Squid Tube/Tuna Fillet, none of which have a hint
+// set) was invisible in the grid even though the data existed. This surfaces all of them.
+function namedSupplierInfo(m){
+  const parts = [];
+  const seen = new Set();
+  const fmtPrice = (v) => "Rp " + Number(v).toLocaleString('id-ID');
+  if(m.hint && !PRICE_COLS.includes(m.hint)){
+    const price = (m.off && m.off[m.hint]!=null) ? m.off[m.hint] : null;
+    parts.push({ label: nameOf(m.hint) + (price!=null ? ` (${fmtPrice(price)})` : " (default)"), isHint: true });
+    seen.add(m.hint);
+  }
+  if(m.off){
+    Object.keys(m.off).forEach(code => {
+      if(code === "IkanBaliNote"){
+        const v = m.off[code];
+        if(v!=null) parts.push({ label: `Ikan Bali ref. (${fmtPrice(v)})`, isHint:false });
+        return;
+      }
+      if(seen.has(code)) return;
+      const v = m.off[code];
+      if(v==null) return;
+      parts.push({ label: `${nameOf(code)} (${fmtPrice(v)})`, isHint:false });
+    });
+  }
+  return parts;
+}
+
+// Named-supplier column width is user-adjustable (Andika asked for a button to widen it so long
+// supplier names/combinations aren't squeezed) and persists across sessions per browser.
+const NAMED_SUPPLIER_COL_WIDTH_LS_KEY = "balagan_matrix_named_col_width_v1";
+const NAMED_SUPPLIER_COL_WIDTH_DEFAULT = 230;
+const NAMED_SUPPLIER_COL_WIDTH_MIN = 150;
+const NAMED_SUPPLIER_COL_WIDTH_MAX = 600;
+function loadNamedSupplierColWidth(){
+  try {
+    const raw = localStorage.getItem(NAMED_SUPPLIER_COL_WIDTH_LS_KEY);
+    const n = raw ? Number(raw) : NAMED_SUPPLIER_COL_WIDTH_DEFAULT;
+    return Number.isFinite(n) && n > 0 ? n : NAMED_SUPPLIER_COL_WIDTH_DEFAULT;
+  } catch(e){ return NAMED_SUPPLIER_COL_WIDTH_DEFAULT; }
+}
+let namedSupplierColWidth = loadNamedSupplierColWidth();
+function adjustNamedSupplierColWidth(delta){
+  namedSupplierColWidth = Math.max(NAMED_SUPPLIER_COL_WIDTH_MIN, Math.min(NAMED_SUPPLIER_COL_WIDTH_MAX, namedSupplierColWidth + delta));
+  try { localStorage.setItem(NAMED_SUPPLIER_COL_WIDTH_LS_KEY, String(namedSupplierColWidth)); } catch(e){}
+  renderMatrixGrid();
+}
+function resetNamedSupplierColWidth(){
+  namedSupplierColWidth = NAMED_SUPPLIER_COL_WIDTH_DEFAULT;
+  try { localStorage.removeItem(NAMED_SUPPLIER_COL_WIDTH_LS_KEY); } catch(e){}
+  renderMatrixGrid();
+}
+
 function renderMatrixGrid(){
   const gridData = MATRIX.map(m => [m.name, m.cat||"", m.unit, m.prices.BB||"", m.prices.TJ||"", m.prices.SJ||"",
-    m.prices.Sarining||"", m.prices.Mimba||"", m.prices.IkanBali||"", m.hint?nameOf(m.hint):"", m.note]);
+    m.prices.Sarining||"", m.prices.Mimba||"", m.prices.IkanBali||"", namedSupplierInfo(m), m.note]);
   document.getElementById('matrixGrid').innerHTML = "";
+  const widthLabel = document.getElementById('namedSupplierColWidthLabel');
+  if(widthLabel) widthLabel.textContent = namedSupplierColWidth + "px";
   gridInstance = new gridjs.Grid({
     // gridjs uses table-layout:fixed, so every column shares width roughly equally unless given
     // an explicit width — with 11 columns that squeezed "Named supplier" down so far that long
     // supplier names (e.g. "Mandala Kriya Utama") were unreadable. Give the two text-heavy
     // columns (Product, Named supplier) real room and keep the short numeric price columns lean.
+    // "Named supplier(s)" width is user-adjustable via the +/-/Reset buttons above the grid.
     columns: [
       { name: "Product", width: "220px" },
       { name: "Category", width: "90px" },
@@ -1486,13 +1674,26 @@ function renderMatrixGrid(){
       { name: "Sarining", width: "75px" },
       { name: "Mimba", width: "65px" },
       { name: "Ikan Bali", width: "75px" },
-      { name: "Named supplier", width: "170px" },
+      { name: "Named supplier(s)", width: namedSupplierColWidth + "px",
+        formatter: (parts) => {
+          if(!parts || !parts.length) return "";
+          const text = parts.map(p=>p.label).join(", ");
+          const html = parts.map(p => `<span${p.isHint ? ' style="font-weight:600"' : ''}>${escapeHtml(p.label)}</span>`).join(", ");
+          return gridjs.html(`<span class="notes-cell" style="max-width:${namedSupplierColWidth-20}px" title="${escapeHtml(text)}">${html}</span>`);
+        } },
       { name: "Notes", width: "200px", formatter: (cell) => gridjs.html(`<span class="notes-cell" title="${escapeHtml(cell)}">${escapeHtml(cell)}</span>`) },
     ],
     data: gridData,
     search: true, sort: true, pagination: {limit:30},
     style: { table: {'font-size':'11px'} }
   }).render(document.getElementById("matrixGrid"));
+  // gridjs renders headers async next tick; give it a moment before patching titles.
+  setTimeout(() => {
+    const headerTitles = ["Product","Category","Unit","Buk Bunga","Tegal Jaya","Sedana Jaya","Sarining UD","Mimba","Ikan Bali","Named supplier(s) — every off-matrix supplier with a recorded price for this product","Notes"];
+    document.querySelectorAll("#matrixGrid th.gridjs-th").forEach((th, i) => {
+      if(headerTitles[i]) th.title = headerTitles[i];
+    });
+  }, 0);
 }
 renderMatrixGrid();
 
