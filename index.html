@@ -131,6 +131,23 @@
   .supplier-combo-menu.open { display:block; }
   .supplier-combo-option { padding:8px 12px; font-size:13.5px; cursor:pointer; color:var(--text); }
   .supplier-combo-option:hover, .supplier-combo-option.active { background:var(--row-hover); }
+  /* Grouped supplier picker (initSupplierCombo(...,true)) — instead of one plain top-to-bottom
+     list, suppliers are bucketed by what they mostly sell (their highest-count matrix category)
+     and laid out as wrapping chips that spread left-to-right, so picking one is faster to scan.
+     Groups are ordered by total products sold (biggest category of supply first); NOT used for
+     the product-match picker, which has no such "category of supply" concept. */
+  .supplier-combo-menu.grouped { left:0; right:auto; width:min(640px, 90vw); max-height:380px; padding:10px 12px; }
+  .supplier-combo-group { margin-bottom:10px; }
+  .supplier-combo-group:last-child { margin-bottom:0; }
+  .supplier-combo-group-title { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.3px; color:var(--text-dim); padding:4px 4px 6px;
+    border-bottom:1px solid var(--border-light); margin-bottom:6px; }
+  .supplier-combo-group-icon { font-size:14px; }
+  .supplier-combo-group-items { display:flex; flex-wrap:wrap; gap:6px 8px; }
+  .supplier-combo-menu.grouped .supplier-combo-option { padding:6px 12px; border:1px solid var(--border);
+    border-radius:999px; background:var(--surface-input); white-space:nowrap; }
+  .supplier-combo-menu.grouped .supplier-combo-option:hover, .supplier-combo-menu.grouped .supplier-combo-option.active {
+    background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
   /* Matched-product picker inside the price-update preview table: narrower than the default
      combo, with a confidence-colored left border carried over from the old static pill so the
      at-a-glance cue survives becoming an editable, searchable field. */
@@ -1243,15 +1260,31 @@ function routeRow(row, ctx){
   return null;
 }
 
+// Pulls out just the quantity token from a pasted order line — the exact same match extractQty()
+// uses to compute it.qty, so whatever we display here always agrees with the number actually used
+// for pricing/threshold math. Returns "" when the line carries no recognizable quantity at all.
+function extractQtyToken(raw){
+  const m = String(raw||"").match(/(\d+(?:[.,]\d+)?)\s*(kg|gram|gr|g|pcs|pc|liter|l|botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket)?/i);
+  return m ? m[0].trim() : "";
+}
 function displayLabel(row, rawText){
-  if(LABEL_OVERRIDE[row.name]) return LABEL_OVERRIDE[row.name];
   // Our kitchen is brand-sensitive: whenever the canonical product name carries an explicit
-  // brand/spec in parentheses — e.g. "Butter (Anchor) 200gr", "Whipping Cream (Milac)" — always
-  // show that full canonical name on the card instead of whatever shorthand was typed/pasted, so
-  // the supplier always sees exactly which brand to send. Plain, non-branded items (most produce)
-  // have no parentheses and keep showing the raw text as before.
-  if(/\([^)]+\)/.test(row.name)) return row.name;
-  return rawText;
+  // brand/spec in parentheses — e.g. "Butter (Anchor) 200gr", "Whipping Cream (Milac)" — or has a
+  // fixed LABEL_OVERRIDE, always show that full canonical name on the card instead of whatever
+  // shorthand was typed/pasted, so the supplier always sees exactly which brand to send. Plain,
+  // non-branded items (most produce) have no parentheses/override and keep showing the raw text
+  // as before — the raw text already carries the ordered quantity inline.
+  const canonical = LABEL_OVERRIDE[row.name] || (/\([^)]+\)/.test(row.name) ? row.name : null);
+  if(!canonical) return rawText;
+  // The canonical name replaces the pasted wording, but NOT the quantity that was actually
+  // ordered — a card that only shows "Agar-agar (Swallow)" with no count lost how many were
+  // wanted. Re-attach the quantity token from the raw line, unless the canonical name already
+  // ends with that exact number (a handful of LABEL_OVERRIDE entries already spell out a fixed
+  // pack count, e.g. "Prawn 15" — don't double it up).
+  const qty = extractQtyToken(rawText);
+  if(!qty) return canonical;
+  if(norm(canonical).endsWith(norm(qty))) return canonical;
+  return canonical + " " + qty;
 }
 
 /* ===================== ORDER PARSING ===================== */
@@ -1646,14 +1679,61 @@ function onAddSupplier(){
 // auto-selects the first supplier) so a bulk update/delete can't run against the wrong
 // supplier just because the field was never touched.
 const supplierComboRegistry = {};
-function initSupplierCombo(id, options, placeholder){
+// Icon + display label per matrix category — used to group the supplier picker by "what does
+// this supplier mostly sell", so the grouping is visually scannable at a glance.
+const CATEGORY_ICON = {
+  FRUITS:"🍎", VEGETABLES:"🥬", HERBS:"🌿", DAIRY:"🧀", PANTRY:"🥫",
+  SEEDS_OIL_NUTS:"🌰", SPICES:"🌶️", BAR_GROCERY:"🍹",
+  MEAT_SEAFOOD_BAKERY:"🥩", WINE_SPIRITS:"🍷", CLEANING:"🧽", OTHER:"📦"
+};
+const CATEGORY_LABEL = {
+  FRUITS:"Fruits", VEGETABLES:"Vegetables", HERBS:"Herbs", DAIRY:"Dairy", PANTRY:"Pantry",
+  SEEDS_OIL_NUTS:"Seeds, Oil & Nuts", SPICES:"Spices", BAR_GROCERY:"Bar Grocery",
+  MEAT_SEAFOOD_BAKERY:"Meat, Seafood & Bakery", WINE_SPIRITS:"Wine & Spirits", CLEANING:"Cleaning",
+  OTHER:"Other / not yet priced"
+};
+// Buckets a flat {code,label} supplier list into groups keyed by each supplier's highest-count
+// matrix category (i.e. what they mostly sell), each group's items sorted by that count (biggest
+// seller of the category first), groups themselves sorted by total products supplied (the
+// category with the most products across all its suppliers leads) so the busiest, most useful
+// groups surface first instead of being ordered arbitrarily.
+function groupSupplierOptionsByCategory(options){
+  const perSupplierCat = {}; // code -> { CATNAME: count, ... }
+  MATRIX.forEach(row => {
+    const cat = row.cat || "OTHER";
+    options.forEach(o => {
+      const p = getRowPrice(row, o.code);
+      if(p===null || p===undefined || p==="") return;
+      perSupplierCat[o.code] = perSupplierCat[o.code] || {};
+      perSupplierCat[o.code][cat] = (perSupplierCat[o.code][cat]||0) + 1;
+    });
+  });
+  const withCat = options.map(o => {
+    const byCat = perSupplierCat[o.code] || {};
+    let bestCat = "OTHER", bestCount = 0;
+    Object.keys(byCat).forEach(cat => { if(byCat[cat] > bestCount){ bestCount = byCat[cat]; bestCat = cat; } });
+    return Object.assign({}, o, { cat:bestCat, catCount:bestCount });
+  });
+  const groups = {};
+  withCat.forEach(o => {
+    groups[o.cat] = groups[o.cat] || { cat:o.cat, items:[], total:0 };
+    groups[o.cat].items.push(o);
+    groups[o.cat].total += o.catCount;
+  });
+  const groupList = Object.values(groups);
+  groupList.forEach(g => g.items.sort((a,b) => b.catCount - a.catCount || a.label.localeCompare(b.label)));
+  groupList.sort((a,b) => b.total - a.total);
+  return groupList;
+}
+
+function initSupplierCombo(id, options, placeholder, grouped){
   const hidden = document.getElementById(id);
   const input = document.getElementById(id + 'Search');
   const menu = document.getElementById(id + 'Menu');
   if(!hidden || !input || !menu) return;
 
   const prevOptions = supplierComboRegistry[id] ? supplierComboRegistry[id].options : null;
-  supplierComboRegistry[id] = { options };
+  supplierComboRegistry[id] = { options, grouped: !!grouped };
   // if the supplier this field held is no longer valid (deleted), clear it
   if(hidden.value && !options.some(o => o.code === hidden.value)) hidden.value = "";
   if(placeholder) input.placeholder = placeholder;
@@ -1669,11 +1749,25 @@ function initSupplierCombo(id, options, placeholder){
 
   function renderMenu(filterText){
     const opts = supplierComboRegistry[id].options;
+    const isGrouped = supplierComboRegistry[id].grouped;
     const q = norm(filterText || "");
     const filtered = q ? opts.filter(o => norm(o.label).includes(q) || norm(o.code).includes(q)) : opts;
-    menu.innerHTML = filtered.length
-      ? filtered.map(o => `<div class="supplier-combo-option" data-code="${escapeHtml(o.code)}">${escapeHtml(o.label)}</div>`).join("")
-      : `<div class="supplier-combo-empty">No supplier matches.</div>`;
+    if(!filtered.length){
+      menu.innerHTML = `<div class="supplier-combo-empty">No supplier matches.</div>`;
+      menu.classList.remove('grouped');
+    } else if(isGrouped){
+      const groups = groupSupplierOptionsByCategory(filtered);
+      menu.innerHTML = groups.map(g => `
+        <div class="supplier-combo-group">
+          <div class="supplier-combo-group-title"><span class="supplier-combo-group-icon">${CATEGORY_ICON[g.cat]||CATEGORY_ICON.OTHER}</span>${escapeHtml(CATEGORY_LABEL[g.cat]||CATEGORY_LABEL.OTHER)}</div>
+          <div class="supplier-combo-group-items">${g.items.map(o =>
+            `<div class="supplier-combo-option" data-code="${escapeHtml(o.code)}">${escapeHtml(o.label)}</div>`).join("")}</div>
+        </div>`).join("");
+      menu.classList.add('grouped');
+    } else {
+      menu.innerHTML = filtered.map(o => `<div class="supplier-combo-option" data-code="${escapeHtml(o.code)}">${escapeHtml(o.label)}</div>`).join("");
+      menu.classList.remove('grouped');
+    }
     menu.classList.add('open');
   }
   function closeMenu(){ menu.classList.remove('open'); }
@@ -1704,7 +1798,7 @@ function initSupplierCombo(id, options, placeholder){
 }
 
 function renderPriceListSupplierOptions(){
-  initSupplierCombo('priceListSupplier', allSupplierOptions(), "Type to search supplier…");
+  initSupplierCombo('priceListSupplier', allSupplierOptions(), "Type to search supplier…", true);
 }
 renderSupplierManager();
 renderPriceListSupplierOptions();
@@ -2109,7 +2203,7 @@ function renderCards(){
     </div>`;
   }
   document.getElementById('results').innerHTML = html || "<p class='hint'>No items distributed yet.</p>";
-  if(unmatched.length){ initSupplierCombo('bulkAssignSupplier', allSupplierOptions(), "Assign selected to…"); }
+  if(unmatched.length){ initSupplierCombo('bulkAssignSupplier', allSupplierOptions(), "Assign selected to…", true); }
 }
 
 async function copyText(id, btn, supplier, type, date){
@@ -2472,7 +2566,7 @@ function parseNameList(text){
 }
 
 function renderMatrixDeleteSupplierOptions(){
-  initSupplierCombo('matrixDeleteSupplier', allSupplierOptions(), "Type to search supplier…");
+  initSupplierCombo('matrixDeleteSupplier', allSupplierOptions(), "Type to search supplier…", true);
 }
 
 function previewBulkDelete(){
@@ -2907,7 +3001,7 @@ async function undoSupplierPriceUpdate(code){
 
 /* ===================== PRICE UPDATE HISTORY (Update Prices tab) ===================== */
 function renderPriceHistoryFilterOptions(){
-  initSupplierCombo('priceHistoryFilterSupplier', allSupplierOptions(), "All suppliers");
+  initSupplierCombo('priceHistoryFilterSupplier', allSupplierOptions(), "All suppliers", true);
   const hidden = document.getElementById('priceHistoryFilterSupplier');
   if(hidden && !hidden.dataset.historyBound){
     hidden.dataset.historyBound = "1";
