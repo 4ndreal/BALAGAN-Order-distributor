@@ -1522,8 +1522,14 @@ function renderSupplierManager(){
 function onSupplierToggle(code, checked){
   setSupplierConfig(code, {disabled: !checked});
   renderMatrixGrid();
-  renderSupplierManager();
   if(currentItems && currentItems.length) distribute();
+  // renderSupplierManager() rebuilds the whole table's innerHTML, which destroys and recreates
+  // this exact switch's DOM nodes — done synchronously (0ms later), that swap happens before the
+  // knob's CSS transition gets even a single animation frame to play, so the slide from right to
+  // left (turning a supplier off) never visibly renders even though the transition is defined
+  // correctly. Delay the rebuild until after the toggle's own .5s transition has actually finished
+  // playing out on the original, still-live DOM node.
+  setTimeout(renderSupplierManager, 520);
 }
 function onSupplierMinOrder(code, value){
   const n = parseFloat(value);
