@@ -287,6 +287,21 @@
   .card h3 { font-size: 16px; color: var(--text); margin: 0 0 10px; font-weight:700; display:flex; align-items:center; gap:7px; }
   .card h3:before { content:""; width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none; }
   .items { font-size: 14px; line-height: 1.75; color: var(--text); white-space: pre-wrap; }
+  /* Visible, interactive replacement for the plain .items text list on each distributed card — one
+     row per item with its own small supplier-reassign dropdown. The .items div still exists per
+     card (see renderCards) but is visually hidden and used only as the Copy button's plain-text
+     source, exactly like the Undistributed pool card already does. */
+  .order-lines { font-size:14px; line-height:1.6; color:var(--text); }
+  .order-line { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:3px 0; }
+  .order-line-text { flex:1; }
+  .order-line-supplier { flex:none; max-width:150px; font-size:11.5px; padding:3px 6px;
+                          background:var(--surface-input); color:var(--text-dim); border:1px solid var(--border);
+                          border-radius:6px; }
+  /* The on/off toggle sits inline in the card's h3 (already display:flex from the rule above) and
+     is pushed to the far right — reuses the exact same .switch/.switch-slider styling as the
+     Suppliers tab's own toggle, and calls the same onSupplierToggle() function, so flipping it off
+     here redistributes the order exactly like turning it off there would. */
+  .card-toggle { margin-left:auto; flex:none; }
   .card-total { margin-top:10px; padding-top:9px; border-top:1px dashed var(--border); font-size:13px;
                 font-weight:700; color:var(--text-dim); display:flex; justify-content:space-between; }
   .copy-btn { margin-top: 10px; background: var(--accent); color: white; border: none;
@@ -2350,10 +2365,22 @@ async function editItemRaw(idx){
 }
 
 function reassign(idx, supplier){
-  currentItems[idx].supplier = supplier || null;
-  currentItems[idx].confidence = supplier ? "high" : "none";
-  currentItems[idx].reason = supplier ? "manual" : "unassigned";
-  currentItems[idx].locked = true; // manual choice should stick through threshold logic
+  const it = currentItems[idx];
+  it.supplier = supplier || null;
+  // Look up the new supplier's own price for this product (whether it's a flexible-pool column
+  // or an off-matrix named supplier — getRowPrice already knows which) so the card's total
+  // actually reflects the reassignment instead of silently keeping the OLD supplier's price.
+  // Only possible when the item matched a real matrix row (it.rowRef) in the first place — a
+  // totally-unmatched raw line still has no price to look up regardless of who it's assigned to.
+  if(supplier && it.rowRef){
+    const p = getRowPrice(it.rowRef, supplier);
+    it.price = (p!=null && p!=="") ? p : null;
+  } else if(!supplier){
+    it.price = null;
+  }
+  it.confidence = supplier ? "high" : "none";
+  it.reason = supplier ? "manual" : "unassigned";
+  it.locked = true; // manual choice should stick through threshold logic
   renderParsed();
   renderCards();
 }
@@ -2381,16 +2408,18 @@ async function bulkAssignUndistributed(){
 function renderCards(){
   const type = document.querySelector('input[name=orderType]:checked').value;
   const date = document.getElementById('orderDate').value;
+  const opts = allSupplierOptions();
+  // Keyed by supplier CODE (not display label) — needed so the per-card toggle can call
+  // onSupplierToggle(code, ...) and the per-line select can compare against the real code, not
+  // a human-readable name that a couple of suppliers could in principle share.
   const grouped = {};
-  const groupedTotals = {};
   const unmatched = [];
   currentItems.forEach((it, idx) => {
     if(!it.supplier){ unmatched.push({it, idx}); return; }
-    const label = nameOf(it.supplier);
-    if(!grouped[label]) grouped[label] = [];
-    grouped[label].push(it.label);
+    if(!grouped[it.supplier]) grouped[it.supplier] = { items: [], total: 0 };
+    grouped[it.supplier].items.push({idx, text: it.label});
     if(it.price!=null && !isNaN(it.price)){
-      groupedTotals[label] = (groupedTotals[label]||0) + it.price*(it.qty||1);
+      grouped[it.supplier].total += it.price*(it.qty||1);
     }
   });
   let html = "";
@@ -2422,21 +2451,42 @@ function renderCards(){
     </div>`;
   }
   let i=0;
-  for(const supplier in grouped){
+  for(const code in grouped){
     const id = "card"+(i++);
-    const total = groupedTotals[supplier];
+    const supplierLabel = nameOf(code);
+    const {items, total} = grouped[code];
     const totalHtml = total ? `<div class="card-total">Total: Rp ${total.toLocaleString('id-ID')}</div>` : "";
+    // Interactive line list: each item gets its own small "reassign" dropdown so a supplier that's
+    // suddenly out of stock/unavailable can be swapped per-product right on the card, with the
+    // total above recalculating live (reassign() looks up the new supplier's own price and
+    // re-renders). The plain hidden .items div right after is what copyText() actually reads from
+    // for the WhatsApp-ready text — same "visible interactive rows + hidden plain-text source"
+    // split already used by the Undistributed pool card below, so Copy never picks up the <select>
+    // markup itself.
+    const lineRows = items.map(({idx, text}) => {
+      const optsHtml = opts.map(o => `<option value="${o.code}" ${o.code===code?"selected":""}>${o.label}</option>`).join("");
+      return `<div class="order-line">
+        <span class="order-line-text">${escapeHtml(text)}</span>
+        <select class="order-line-supplier" onchange="reassign(${idx}, this.value)" title="Change supplier for this item">${optsHtml}</select>
+      </div>`;
+    }).join("");
+    const plainLines = items.map(x => x.text).join("\n");
     html += `<div class="card">
       <h2>ORDER — ${type.toUpperCase()} &nbsp;|&nbsp; ${date}</h2>
-      <h3>${supplier}</h3>
-      <div class="items" id="${id}">${grouped[supplier].join("\n")}</div>
+      <h3>${supplierLabel}
+        <label class="switch card-toggle" title="Turn ${escapeHtml(supplierLabel)} off — its items redistribute automatically, same as the Suppliers tab">
+          <input type="checkbox" checked onchange="onSupplierToggle('${code}', this.checked)">
+          <span class="switch-slider"></span>
+        </label>
+      </h3>
+      <div class="order-lines">${lineRows}</div>
+      <div class="items" id="${id}" style="position:absolute;opacity:0;pointer-events:none;height:1px;overflow:hidden">${plainLines}</div>
       ${totalHtml}
-      <button class="copy-btn" onclick="copyText('${id}', this, '${supplier}', '${type}', '${date}')">Copy</button>
+      <button class="copy-btn" onclick="copyText('${id}', this, '${supplierLabel}', '${type}', '${date}')">Copy</button>
     </div>`;
   }
   if(unmatched.length){
     const id = "card_undistributed";
-    const opts = allSupplierOptions();
     const lines = unmatched.map(({it}) => it.raw + (it.matched ? "  (closest match: "+it.matched+", no active price)" : "  (no match found)"));
     const optsHtml = `<option value="">— choose supplier —</option>` + opts.map(o => `<option value="${o.code}">${o.label}</option>`).join("");
     const rows = unmatched.map(({it, idx}) => `<tr>
