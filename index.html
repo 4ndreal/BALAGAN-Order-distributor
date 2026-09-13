@@ -1230,7 +1230,18 @@ function wordsAreTypoOf(w1, w2){
   // outscoring every product that actually contains the word "sparkling".
   if(/\d/.test(w1) || /\d/.test(w2)) return false;
   const maxLen = Math.max(w1.length, w2.length);
-  if(maxLen < 4 || Math.abs(w1.length-w2.length) > 2) return false;
+  const minLen = Math.min(w1.length, w2.length);
+  // Real routing bug (13 Sep 2026, stress-test sweep): a bar order's "bayam 300gr" (spinach)
+  // silently matched "Chicken Wings / Sayap Ayam" at HIGH confidence, because this guard used to
+  // gate on the LONGER word's length (maxLen<4) — "bayam"(5) vs "ayam"(4) has maxLen=5, which
+  // sailed straight past a "maxLen<4" floor even though the SHORTER word ("ayam", the one doing
+  // all the semantic work here) is short enough that a single-character edit distance completely
+  // changes its meaning ("ayam"=chicken, "bayam"=spinach — not a typo of each other at all, just
+  // one Indonesian word with a "b" prepended to a totally different Indonesian word). Gating on
+  // minLen instead protects exactly this case: whichever word is shorter is where a 1-character
+  // edit represents the biggest proportional change, so IT needs to clear its own length bar, not
+  // just whichever word happens to be longer in the pair.
+  if(minLen < 5 || Math.abs(w1.length-w2.length) > 2) return false;
   const allowed = maxLen <= 6 ? 1 : 2;
   return editDistance(w1, w2) <= allowed;
 }
@@ -1892,20 +1903,27 @@ function playClickSoundNow(ctx, theme){
       playTone(ctx, master, now, 900, null, 0.045, 'square', 0.06, 0.4);
   }
 }
-// The Distribute button is the payoff moment of the whole workflow — pressing it resolves however
-// long Andika just spent reviewing/fixing items, so it gets its own signature "relief" sound
-// (theme-independent, on purpose: it's a distinct, special action, not "just another button")
-// instead of the routine theme click: a soft breathy exhale swell (filtered noise, gain rising
-// then fading — a "phew") under a warm descending two-note resolve, which reads as tension
-// releasing rather than a triumphant fanfare (an ascending gesture would read as "success!"
-// instead of "relief").
+// The Distribute button is the payoff moment of the whole workflow, so it still gets its own
+// signature sound (theme-independent on purpose - a distinct, special action, not "just another
+// button") instead of the routine theme click. Andika (13 Sep 2026): "change the distribution
+// button sound to be more like robotic processing some data" - replaced the old soft breathy
+// "phew" exhale-plus-resolve with a stuttering, staccato sequence of quick square-wave beeps that
+// alternate between a low and high pitch band (like a machine scanning/crunching through a list),
+// a thin high-frequency noise layer underneath for a data-stream/scanner texture, then a clean
+// two-note confirm beep once "processing" finishes - still gives the same payoff feel as before,
+// just re-flavored as "a computer just finished the job" rather than a human sigh of relief.
 function playDistributeSound(){
   withAudioCtx((ctx) => {
     const now = ctx.currentTime;
-    const master = makeMasterGain(ctx, 0.22); // a touch more present than routine clicks — this is the payoff
-    playNoiseBurst(ctx, master, now, { dur: 0.5, filterType: 'lowpass', freqStart: 250, freqEnd: 900, Q: 0.7, peak: 0.3 });
-    playTone(ctx, master, now, 784, 523, 0.35, 'sine', 0.05, 0.6);
-    playTone(ctx, master, now, 523, 392, 0.30, 'sine', 0.18, 0.4);
+    const master = makeMasterGain(ctx, 0.22); // a touch more present than routine clicks - this is the payoff
+    const pattern = [420, 960, 460, 1020, 400, 980, 500, 1080];
+    pattern.forEach((f, i) => {
+      playTone(ctx, master, now, f, null, 0.032, 'square', i * 0.042, 0.32);
+    });
+    playNoiseBurst(ctx, master, now, { dur: pattern.length * 0.042 + 0.05, filterType: 'highpass', freqStart: 3500, freqEnd: 3500, Q: 1, peak: 0.08 });
+    const endAt = pattern.length * 0.042 + 0.02;
+    playTone(ctx, master, now, 1046, null, 0.08, 'square', endAt, 0.5);
+    playTone(ctx, master, now, 1568, null, 0.10, 'square', endAt + 0.10, 0.5);
   });
 }
 // Delegated listeners so every current AND future button/tab/chip and select/checkbox/radio/date
