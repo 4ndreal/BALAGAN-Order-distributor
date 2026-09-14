@@ -354,6 +354,24 @@
   .card-redistribute-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-light); }
   .card-redistribute-row:last-child { border-bottom: none; }
   .card-redistribute-label { font-size: 13px; flex: 1 1 auto; }
+  /* Andika (15 Sep 2026, Products tab): "remove the supplier field with name below each products
+     there. it took too much space. just make it when we click on the product there's suppliers
+     name pop up... put unlock button beside the product name and put unlock icon instead of
+     writing" — each locked-product row in the sidebar summary is now just a name (click to open
+     openProductLockPickPopup's supplier-choice popup) + one icon-only unlock button, no
+     always-visible combo eating vertical space in a 300px-wide sidebar. */
+  .product-lock-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 0; }
+  .product-lock-name { font-size: 13px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 0 -3px; }
+  .product-lock-name:hover { background: var(--flag-green-bg); color: var(--accent); }
+  .product-lock-unlock-btn { padding: 2px 6px !important; font-size: 13px !important; line-height: 1.3; flex: none; }
+  .product-lock-pick-box { max-width: 380px; }
+  /* Ban-picker popup (opened by clicking a product name in the Banned-products sidebar summary,
+     or reachable the same way the lock popup is) — a scrollable checklist covering EVERY
+     registered supplier, not just priced ones, per "enable us to ban the product to any supplier
+     we want". */
+  .product-ban-pick-box { max-width: 380px; }
+  .product-ban-pick-list { max-height: 45vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin: 4px 0 2px; }
+  .product-ban-pick-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 400; cursor: pointer; }
   .card-wide, #results > .flag { grid-column: 1 / -1; }
   .card h2 { font-size: 11px; color: var(--text-faint); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.6px; font-weight:600; }
   .card h3 { font-size: 16px; color: var(--text); margin: 0 0 10px; font-weight:700; display:flex; align-items:center; gap:7px; }
@@ -838,6 +856,7 @@
         <div class="price-history-head">
           <h3 class="price-history-title">Banned products, by supplier</h3>
         </div>
+        <p class="hint" style="margin-top:0">Click a product to manage which suppliers it's banned from (any supplier, not just priced ones) · ✅ quick-removes just that one ban.</p>
         <div id="productBansSummary"></div>
       </div>
     </div>
@@ -1201,6 +1220,12 @@ const LOCK_SOURCE_LABEL = {
   hard: '🔐 built-in hard lock',
   hint: '🔗 legacy "Default → X" hint',
 };
+// Undo stack for lock edits made from the Products tab summary (pushProductLockUndo/
+// undoLastProductLockChange, defined much further down near renderProductLocksSummary) — declared
+// here, not there, for the same reason LOCK_SOURCE_LABEL above is: renderMatrixGrid() runs
+// immediately at script load and reaches renderProductLocksSummary() (which reads this array)
+// before execution would otherwise reach a `let` declared next to the functions that use it.
+let productLockUndoStack = [];
 // Per-row supplier exclusions on top of the normal pool (name -> [codes to exclude]). Andika (14
 // Sep 2026, Products tab): "set product lock to specific supplier or banned that product to
 // ordered from specific supplier" - like DEFAULT_PRODUCT_LOCKS below, this is now a real
@@ -1281,6 +1306,29 @@ function getProductLock(name){
 function setProductLock(name, code){
   productLocks[name] = code || "";
   saveProductLocks();
+}
+// Andika (15 Sep 2026): "change all legacy or default to be editable status" - the hard-lock
+// (HARD_LOCK_IN_POOL) and legacy-hint (row.hint) mechanisms have no storage of their own that's
+// safe to edit per-browser (one's baked into the app's source, the other lives on the MATRIX row
+// itself and is shared with the Edit Matrix form) - so rather than editing that underlying data,
+// a product locked ONLY via one of those two gets "unlocked" by recording it here, which
+// effectiveProductLock() and routeRow() both check and skip past straight to normal price-based
+// routing. An explicit productLocks entry (source:'explicit') still always wins over this, exactly
+// like it already wins over hard/hint - so setting a NEW explicit lock on a force-unlocked product
+// re-locks it, no separate "clear the force-unlock flag" step needed.
+const PRODUCT_FORCE_UNLOCK_LS_KEY = "balagan_product_force_unlock_v1";
+function loadProductForceUnlock(){
+  try { const raw = localStorage.getItem(PRODUCT_FORCE_UNLOCK_LS_KEY); return raw ? JSON.parse(raw) : {}; }
+  catch(e){ return {}; }
+}
+function saveProductForceUnlock(){
+  try { localStorage.setItem(PRODUCT_FORCE_UNLOCK_LS_KEY, JSON.stringify(productForceUnlock)); } catch(e){}
+}
+let productForceUnlock = loadProductForceUnlock();
+function isForceUnlocked(name){ return !!productForceUnlock[name]; }
+function setForceUnlock(name, val){
+  if(val) productForceUnlock[name] = true; else delete productForceUnlock[name];
+  saveProductForceUnlock();
 }
 // Kitchen-order label overrides for certain canonical rows
 const LABEL_OVERRIDE = {
@@ -1860,8 +1908,9 @@ function routeRow(row, ctx){
     // end up Undistributed if literally every option is disabled, which is honest rather than
     // misleading.
   }
-  // 3. Explicit hard locks inside the flexible pool ("regardless of price")
-  if(HARD_LOCK_IN_POOL[row.name]){
+  // 3. Explicit hard locks inside the flexible pool ("regardless of price") - skipped if Andika
+  // force-unlocked this product from the Products tab summary (see isForceUnlocked() above).
+  if(HARD_LOCK_IN_POOL[row.name] && !isForceUnlocked(row.name)){
     const s = HARD_LOCK_IN_POOL[row.name];
     return {supplier:s, price: row.prices ? row.prices[s] : null, locked:true, reason:"locked regardless of price"};
   }
@@ -1871,8 +1920,9 @@ function routeRow(row, ctx){
   const hint = normalizeHintCode(row.hint);
   // Andika (14 Sep 2026, Products tab): a ban also skips a named-supplier hint - if the row's
   // "Default -> X" note points at the very supplier Andika just banned it from, fall through to
-  // the rules below instead of routing there anyway.
-  if(hint && !FLEXIBLE_POOL.includes(hint) && !DISABLED.includes(hint) && !getProductBans(row.name).includes(hint) && !isClosedForDelivery(hint, ctx.dateObj)){
+  // the rules below instead of routing there anyway. Force-unlock (15 Sep 2026) does the same for
+  // a hint Andika explicitly cleared from the Products tab summary.
+  if(hint && !FLEXIBLE_POOL.includes(hint) && !DISABLED.includes(hint) && !getProductBans(row.name).includes(hint) && !isClosedForDelivery(hint, ctx.dateObj) && !isForceUnlocked(row.name)){
     const price = (row.off && row.off[hint]) || null;
     return {supplier:hint, price, locked:true, reason:"named-supplier rule"};
   }
@@ -3418,6 +3468,7 @@ function renderProductBrowseList(){
 function effectiveProductLock(row){
   const explicit = getProductLock(row.name);
   if(explicit) return {code: explicit, source: 'explicit'};
+  if(isForceUnlocked(row.name)) return null;
   if(HARD_LOCK_IN_POOL[row.name]) return {code: HARD_LOCK_IN_POOL[row.name], source: 'hard'};
   const hint = normalizeHintCode(row.hint);
   if(hint && !FLEXIBLE_POOL.includes(hint)) return {code: hint, source: 'hint'};
@@ -3438,7 +3489,7 @@ function renderProductLockPanel(){
     ? `<p class="hint" style="margin:0 0 12px">Not locked — routes to the cheapest active supplier.</p>`
     : effective.source === 'explicit'
       ? `<p class="hint" style="margin:0 0 12px">🔒 Locked to <strong>${escapeHtml(nameOf(effective.code))}</strong> via this dropdown.</p>`
-      : `<p class="hint" style="margin:0 0 12px;background:var(--flag-green-bg)">${LOCK_SOURCE_LABEL[effective.source]}: routes to <strong>${escapeHtml(nameOf(effective.code))}</strong> regardless of price — ${effective.source==='hint' ? 'set via the "Default → X" note in this product\'s Edit Matrix form, not editable here directly' : 'built into the app itself (HARD_LOCK_IN_POOL), not editable from any tab'}. Setting a lock below with the dropdown will take priority over it.</p>`;
+      : `<p class="hint" style="margin:0 0 12px;background:var(--flag-green-bg)">${LOCK_SOURCE_LABEL[effective.source]}: routes to <strong>${escapeHtml(nameOf(effective.code))}</strong> regardless of price — ${effective.source==='hint' ? 'set via the "Default → X" note in this product\'s Edit Matrix form' : 'built into the app itself (HARD_LOCK_IN_POOL)'}, so it isn't stored in this dropdown's own setting — but picking a supplier below (or "no lock") still takes priority over it and overrides it, same as any other lock here.</p>`;
   // Every supplier with a recorded price for this row, cheapest first - this is what the lock/ban
   // decision actually needs to be made against (a supplier with no price for this product can't be
   // locked or banned meaningfully).
@@ -3468,11 +3519,14 @@ function renderProductLockPanel(){
         <option value="">— no lock, route normally —</option>
         ${allSupplierCodes().map(c => `<option value="${c}" ${c===currentLock?'selected':''}>${escapeHtml(nameOf(c))}</option>`).join("")}
       </select>
-      <label style="margin-top:12px">Ban from supplier(s) — that supplier is skipped for THIS product even if it's the cheapest active option. Only suppliers with a recorded price for this product are listed (a supplier with no price can't be chosen anyway).</label>
+      <label style="margin-top:12px">Ban from supplier(s) — that supplier is skipped for THIS product even if it's the cheapest active option. Andika (15 Sep 2026): "enable us to ban the product to any supplier we want" — every registered supplier is listed here now, not just ones with a recorded price for this product (a price-free supplier can still be worth banning pre-emptively, e.g. before a quote is even entered).</label>
       <div class="edit-grid" id="prodBanChecks">
-        ${priced.length ? priced.map(p => `<label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;font-size:13px">
-            <input type="checkbox" value="${escapeHtml(p.code)}" ${currentBans.includes(p.code)?'checked':''}> ${escapeHtml(nameOf(p.code))}
-          </label>`).join("") : `<span class="hint">Nothing to ban — no supplier prices recorded yet.</span>`}
+        ${allSupplierCodes().slice().sort((a,b)=>nameOf(a).localeCompare(nameOf(b))).map(c => {
+          const p = priced.find(x => x.code===c);
+          return `<label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;font-size:13px">
+            <input type="checkbox" value="${escapeHtml(c)}" ${currentBans.includes(c)?'checked':''}> ${escapeHtml(nameOf(c))}${p ? ` <span class="hint">(Rp ${Number(p.price).toLocaleString('id-ID')})</span>` : ` <span class="hint">(no price on file)</span>`}
+          </label>`;
+        }).join("")}
       </div>
       <div style="margin-top:14px">
         <button class="btn-primary" onclick="saveProductLockBan('${escapeHtml(String(row.r))}')">Save</button>
@@ -3484,7 +3538,14 @@ function saveProductLockBan(rowId){
   const row = MATRIX.find(m => String(m.r) === String(rowId));
   if(!row) return;
   const lockSelect = document.getElementById('prodLockSelect');
-  setProductLock(row.name, lockSelect ? lockSelect.value : "");
+  const newCode = lockSelect ? lockSelect.value : "";
+  pushProductLockUndo(row.name, newCode ? `changed ${row.name}'s lock to ${nameOf(newCode)}` : `unlocked ${row.name}`);
+  setProductLock(row.name, newCode);
+  // Andika (15 Sep 2026): "change all legacy or default to be editable status" — picking "no lock"
+  // here needs to mean genuinely no lock, even for a product whose only lock was a hard/hint rule
+  // underneath (previously this only cleared the explicit layer, so the hard/hint rule would
+  // silently keep governing routing even though the dropdown showed "no lock, route normally").
+  setForceUnlock(row.name, !newCode);
   const checked = Array.from(document.querySelectorAll('#prodBanChecks input[type=checkbox]:checked')).map(el => el.value);
   setProductBans(row.name, checked);
   renderProductLockPanel();
@@ -3511,43 +3572,225 @@ function quickUnbanProduct(name, code){
   renderMatrixGrid();
   if(currentItems && currentItems.length) distribute();
 }
+// Andika (15 Sep 2026): "make us able to edit locked product from the summary box. there's also
+// need to be undo button there" + "change all legacy or default to be editable status" — the
+// summary now lets Andika change or clear ANY of the 3 lock sources (not just explicit) directly
+// from each row, with a single-slot undo covering whatever the most recent edit/unlock was. Kept
+// deliberately simple (one slot, not a full history) since this is meant for "oops, put that back"
+// right after a click, not a long audit trail. (productLockUndoStack itself is declared way up
+// near HARD_LOCK_IN_POOL/LOCK_SOURCE_LABEL, NOT here — renderMatrixGrid() runs immediately at
+// script load and reaches renderProductLocksSummary() before execution ever gets this far down the
+// file, so a `let` declared at this point would still be in its temporal dead zone on that first
+// call and throw, exactly like the LOCK_SOURCE_LABEL bug fixed earlier today - see that fix's
+// comment for the full story.)
+function pushProductLockUndo(name, actionLabel){
+  productLockUndoStack.push({
+    name,
+    hadExplicit: Object.prototype.hasOwnProperty.call(productLocks, name),
+    prevExplicit: productLocks[name],
+    prevForceUnlock: !!productForceUnlock[name],
+    actionLabel,
+  });
+  if(productLockUndoStack.length > 20) productLockUndoStack.shift();
+}
+function undoLastProductLockChange(){
+  const last = productLockUndoStack.pop();
+  if(!last) return;
+  if(last.hadExplicit) productLocks[last.name] = last.prevExplicit; else delete productLocks[last.name];
+  saveProductLocks();
+  setForceUnlock(last.name, last.prevForceUnlock);
+  renderProductLockPanel();
+  renderProductLocksSummary();
+  renderMatrixGrid();
+  if(currentItems && currentItems.length) distribute();
+}
+// Changing the supplier from the summary box always writes an EXPLICIT lock — even for a product
+// that was previously only hard/hint-locked — since explicit already outranks both of those in
+// effectiveProductLock()/routeRow(), this transparently "takes over" the legacy lock rather than
+// needing to edit the hint or HARD_LOCK_IN_POOL data itself.
+function editProductLockFromSummary(name, newCode){
+  if(!newCode) return;
+  pushProductLockUndo(name, `changed ${name}'s lock to ${nameOf(newCode)}`);
+  setProductLock(name, newCode);
+  setForceUnlock(name, false); // a fresh explicit choice supersedes any earlier force-unlock flag
+  renderProductLockPanel();
+  renderProductLocksSummary();
+  renderMatrixGrid();
+  if(currentItems && currentItems.length) distribute();
+}
+// Fully unlocks regardless of source: clears any explicit entry AND sets the force-unlock flag so
+// routeRow() also skips past a hard/hint lock underneath, restoring genuine cheapest-active
+// routing — not just hiding the product from this summary the way the old explicit-only
+// quickUnlockProduct() did.
+function unlockProductFromSummary(name){
+  pushProductLockUndo(name, `unlocked ${name}`);
+  setProductLock(name, "");
+  setForceUnlock(name, true);
+  renderProductLockPanel();
+  renderProductLocksSummary();
+  renderMatrixGrid();
+  if(currentItems && currentItems.length) distribute();
+}
+// Same reusable searchable-combo component the Parsed table / card-redistribute popup already use
+// (reassignComboHtml/initReassignCombos) — same markup/classes, just wired to
+// editProductLockFromSummary() instead of reassign() and keyed by MATRIX row id instead of an
+// order-item index (a product can appear in the summary even with no current order loaded).
+function productLockComboHtml(rowId, currentCode){
+  const comboId = `productLockCombo_${rowId}`;
+  return `<div class="supplier-combo supplier-combo-inline">
+    <input type="text" class="supplier-combo-input" id="${comboId}Search" placeholder="Type to search supplier…" autocomplete="off">
+    <input type="hidden" id="${comboId}" value="${escapeHtml(currentCode||'')}">
+    <div class="supplier-combo-menu" id="${comboId}Menu"></div>
+  </div>`;
+}
+function initProductLockCombos(entries){
+  const opts = allSupplierOptions();
+  entries.forEach(({rowId, name}) => {
+    const comboId = `productLockCombo_${rowId}`;
+    initSupplierCombo(comboId, opts, "Type to search supplier…", true);
+    const hidden = document.getElementById(comboId);
+    if(hidden) hidden.addEventListener('change', () => editProductLockFromSummary(name, hidden.value));
+  });
+}
 // "show the locked product or banned product on specific pool" — grouped by the SUPPLIER they're
 // locked/banned against, so Andika can see at a glance everything tied to (or excluded from) any
 // one supplier, rather than hunting product-by-product.
+// Andika (15 Sep 2026, follow-up): "remove the supplier field with name below each products there.
+// it took too much space. just make it when we click on the product there's suppliers name pop up
+// where we can choose the suppliers and put unlock button beside the product name and put unlock
+// icon instead of writing" — replaces the always-visible inline combo (one per row, ate a lot of
+// vertical space in a 300px sidebar) with a click-to-open popup, same pattern as
+// openCardRedistributePopup already uses elsewhere in this file. The unlock control moves from a
+// "✕ Unlock" text button to a single icon button sitting right beside the name.
+function openProductLockPickPopup(rowId, name, currentCode){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box product-lock-pick-box">
+      <div class="modal-message" style="margin-bottom:4px"><strong>${escapeHtml(name)}</strong></div>
+      <p class="hint" style="margin:0 0 10px">Choose which supplier this product should be locked to.</p>
+      <div id="productLockPickWrap">${productLockComboHtml('pick_'+rowId, currentCode||'')}</div>
+      <div class="modal-actions"><button class="btn-secondary" id="productLockPickClose" type="button" style="margin-top:0">Close</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  function close(){
+    document.removeEventListener("keydown", onKeydown);
+    overlay.remove();
+  }
+  function onKeydown(e){ if(e.key==="Escape") close(); }
+  document.addEventListener("keydown", onKeydown);
+  overlay.addEventListener("click", (e) => { if(e.target===overlay) close(); });
+  overlay.querySelector("#productLockPickClose").onclick = close;
+  initProductLockCombos([{rowId: 'pick_'+rowId, name}]);
+  // initProductLockCombos already wires the hidden input's 'change' -> editProductLockFromSummary
+  // (which re-renders the sidebar behind this overlay); chain a second listener, registered after
+  // so it runs after that's done, to close the popup once a choice is actually made.
+  const hidden = document.getElementById(`productLockCombo_pick_${rowId}`);
+  if(hidden) hidden.addEventListener('change', close);
+}
 function renderProductLocksSummary(){
   const box = document.getElementById('productLocksSummary');
   if(!box) return;
-  // Now includes all 3 lock mechanisms (explicit/hard/hint — see effectiveProductLock()'s own
-  // comment for the full backstory), not just the explicit productLocks this summary used to be
-  // limited to. Each entry is tagged with its source; only explicit locks get a quick-unlock ✕,
-  // since that's the only one of the three actually removable from this tab.
+  // Includes all 3 lock mechanisms (explicit/hard/hint — see effectiveProductLock()'s own comment
+  // for the full backstory). Clicking a product name opens openProductLockPickPopup() above to
+  // change its target supplier; the icon-only button beside it unlocks it entirely (see
+  // editProductLockFromSummary/unlockProductFromSummary above).
   const bySupplier = {};
   MATRIX.forEach(m => {
     const eff = effectiveProductLock(m);
-    if(eff){ bySupplier[eff.code] = bySupplier[eff.code]||[]; bySupplier[eff.code].push({name:m.name, source:eff.source}); }
+    if(eff){ bySupplier[eff.code] = bySupplier[eff.code]||[]; bySupplier[eff.code].push({row:m, source:eff.source}); }
   });
   const codes = Object.keys(bySupplier).sort((a,b) => nameOf(a).localeCompare(nameOf(b)));
-  if(!codes.length){ box.innerHTML = `<p class="hint">No products are currently locked to a supplier.</p>`; return; }
-  box.innerHTML = codes.map(code => `
+  const lastAction = productLockUndoStack.length ? productLockUndoStack[productLockUndoStack.length-1] : null;
+  const undoBtn = lastAction
+    ? `<button class="btn-secondary" style="margin-bottom:10px" onclick="undoLastProductLockChange()" title="Undo: ${escapeHtml(lastAction.actionLabel)}">↩ Undo last change</button>`
+    : "";
+  if(!codes.length){ box.innerHTML = undoBtn + `<p class="hint">No products are currently locked to a supplier.</p>`; return; }
+  box.innerHTML = undoBtn + codes.map(code => `
     <div style="margin-bottom:10px">
       <strong>${escapeHtml(nameOf(code))}</strong> <span class="hint">(${bySupplier[code].length})</span>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
-        ${bySupplier[code].sort((a,b)=>a.name.localeCompare(b.name)).map(({name, source}) => `<span class="tag" style="background:var(--flag-green-bg);color:var(--accent);display:inline-flex;align-items:center;gap:5px" title="${escapeHtml(LOCK_SOURCE_LABEL[source])}">${escapeHtml(name)}${source==='explicit' ? `<button class="btn-secondary" style="padding:0 5px;font-size:11px;line-height:1.4" onclick="quickUnlockProduct('${escapeHtml(name.replace(/'/g,"\\'"))}')" title="Remove this lock">✕</button>` : ` <span style="opacity:.7">${source==='hard'?'🔐':'🔗'}</span>`}</span>`).join("")}
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
+        ${bySupplier[code].sort((a,b)=>a.row.name.localeCompare(b.row.name)).map(({row, source}) => {
+          const icon = source==='explicit' ? '🔒' : (source==='hard' ? '🔐' : '🔗');
+          const nameArg = escapeHtml(row.name.replace(/'/g,"\\'"));
+          return `<div class="product-lock-summary-row">
+            <span class="product-lock-name" title="${escapeHtml(LOCK_SOURCE_LABEL[source])} — click to change supplier" onclick="openProductLockPickPopup('${row.r}', '${nameArg}', '${code}')">${icon} ${escapeHtml(row.name)}</span>
+            <button class="btn-secondary product-lock-unlock-btn" onclick="unlockProductFromSummary('${nameArg}')" title="Unlock ${escapeHtml(row.name)} (route by normal price comparison instead, regardless of source)" aria-label="Unlock ${escapeHtml(row.name)}">🔓</button>
+          </div>`;
+        }).join("")}
       </div>
     </div>`).join("");
+}
+// Andika (15 Sep 2026): "the position of this ban list isn't correctly put hard to see which
+// button has those supplier name and it is very limited to only specific supplier. enable us to
+// ban the product to any supplier we want" — same 2 problems the Locked-products summary had
+// before its own redesign: (1) wrapping tag-pills with a tiny ✕ crammed inside each one made it
+// unclear which supplier heading a button belonged to once the list wrapped across lines: (2) a
+// product could only be banned from a supplier that already had a recorded price for it. Fixed
+// both the same way — a clean one-row-per-product list (clear vertical association with its
+// supplier heading, no wrapping pills) with a click-to-open popup listing EVERY registered
+// supplier as a checkbox (not just priced ones), so a product can be banned from any supplier at
+// all, including one with no price on file yet.
+function openProductBanPickPopup(rowId, name){
+  const row = MATRIX.find(m => String(m.r) === String(rowId));
+  if(!row) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  function currentBans(){ return getProductBans(name); }
+  function listHtml(){
+    const bans = currentBans();
+    return allSupplierCodes().slice().sort((a,b)=>nameOf(a).localeCompare(nameOf(b))).map(code => {
+      const price = getRowPrice(row, code);
+      return `<label class="product-ban-pick-row">
+        <input type="checkbox" data-code="${escapeHtml(code)}" ${bans.includes(code)?'checked':''}>
+        ${escapeHtml(nameOf(code))} ${price!=null && price!=="" ? `<span class="hint">(Rp ${Number(price).toLocaleString('id-ID')})</span>` : `<span class="hint">(no price on file)</span>`}
+      </label>`;
+    }).join("");
+  }
+  overlay.innerHTML = `
+    <div class="modal-box product-ban-pick-box">
+      <div class="modal-message" style="margin-bottom:4px"><strong>${escapeHtml(name)}</strong></div>
+      <p class="hint" style="margin:0 0 10px">Tick any supplier(s) this product should never be ordered from, even if cheapest. Every registered supplier is listed, not just ones with a price on file.</p>
+      <div class="product-ban-pick-list" id="productBanPickList">${listHtml()}</div>
+      <div class="modal-actions"><button class="btn-secondary" id="productBanPickClose" type="button" style="margin-top:0">Close</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  function close(){
+    document.removeEventListener("keydown", onKeydown);
+    overlay.remove();
+  }
+  function onKeydown(e){ if(e.key==="Escape") close(); }
+  document.addEventListener("keydown", onKeydown);
+  overlay.addEventListener("click", (e) => { if(e.target===overlay) close(); });
+  overlay.querySelector("#productBanPickClose").onclick = close;
+  overlay.querySelector("#productBanPickList").addEventListener('change', (e) => {
+    const cb = e.target.closest('input[type=checkbox]');
+    if(!cb) return;
+    toggleProductBan(name, cb.dataset.code, cb.checked);
+    renderProductLockPanel();
+    renderProductBansSummary();
+    renderMatrixGrid();
+    if(currentItems && currentItems.length) distribute();
+  });
 }
 function renderProductBansSummary(){
   const box = document.getElementById('productBansSummary');
   if(!box) return;
   const bySupplier = {};
-  MATRIX.forEach(m => { getProductBans(m.name).forEach(code => { bySupplier[code] = bySupplier[code]||[]; bySupplier[code].push(m.name); }); });
+  MATRIX.forEach(m => { getProductBans(m.name).forEach(code => { bySupplier[code] = bySupplier[code]||[]; bySupplier[code].push(m); }); });
   const codes = Object.keys(bySupplier).sort((a,b) => nameOf(a).localeCompare(nameOf(b)));
   if(!codes.length){ box.innerHTML = `<p class="hint">No products are currently banned from a supplier.</p>`; return; }
   box.innerHTML = codes.map(code => `
     <div style="margin-bottom:10px">
-      <strong>${escapeHtml(nameOf(code))}</strong>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
-        ${bySupplier[code].sort().map(name => `<span class="tag" style="background:var(--danger-bg);color:var(--danger-text);display:inline-flex;align-items:center;gap:5px">${escapeHtml(name)}<button class="btn-secondary" style="padding:0 5px;font-size:11px;line-height:1.4" onclick="quickUnbanProduct('${escapeHtml(name.replace(/'/g,"\\'"))}','${escapeHtml(code)}')" title="Remove this ban">✕</button></span>`).join("")}
+      <strong>${escapeHtml(nameOf(code))}</strong> <span class="hint">(${bySupplier[code].length})</span>
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
+        ${bySupplier[code].sort((a,b)=>a.name.localeCompare(b.name)).map(row => {
+          const nameArg = escapeHtml(row.name.replace(/'/g,"\\'"));
+          return `<div class="product-lock-summary-row">
+            <span class="product-lock-name" title="Click to manage this product's bans" onclick="openProductBanPickPopup('${row.r}', '${nameArg}')">🚫 ${escapeHtml(row.name)}</span>
+            <button class="btn-secondary product-lock-unlock-btn" onclick="quickUnbanProduct('${nameArg}','${escapeHtml(code)}')" title="Remove this ban only (from ${escapeHtml(nameOf(code))})" aria-label="Unban ${escapeHtml(row.name)} from ${escapeHtml(nameOf(code))}">✅</button>
+          </div>`;
+        }).join("")}
       </div>
     </div>`).join("");
 }
