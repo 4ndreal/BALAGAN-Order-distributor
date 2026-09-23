@@ -348,6 +348,17 @@
   .order-line-text:active { cursor: grabbing; }
   .order-line-text.dragging { opacity: 0.4; }
   .order-card.drag-over { border-color: var(--accent); border-style: dashed; box-shadow: 0 0 0 3px var(--accent-ring); }
+  /* Andika (24 Sep 2026): "make also suggestion on the side of each products like small icon that
+     has pop up that would suggest the possibility of a cheaper options" — a small inline icon next
+     to any order line whose row has a genuinely cheaper active supplier than the one it's currently
+     routed to (see findCheaperAlternative() in renderCards()). Only appears when there's a real gap
+     to explain, so most lines show nothing. Sits inline with the line's own draggable text; its own
+     onclick stops propagation so it doesn't also trigger the card's redistribute popup or start a
+     drag. */
+  .cheaper-alt-icon { display:inline-block; margin-left:6px; cursor:pointer; font-size:12px; line-height:1;
+    padding:1px 4px; border-radius:8px; background:var(--flag-green-bg); vertical-align:middle;
+    transform:translateY(-1px); transition:transform .15s ease; }
+  .cheaper-alt-icon:hover { transform:translateY(-1px) scale(1.18); }
   .card-redistribute-hint { font-size: 11px; color: var(--text-faint); margin: 6px 0 2px; }
   .card-redistribute-box { max-width: 480px; }
   .card-redistribute-list { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
@@ -2160,6 +2171,49 @@ function routeRow(row, ctx){
   const best = poolCheapest(row, pool, excludeExtra, ctx.dateObj);
   if(best) return {supplier:best.supplier, price:best.price, locked:false, reason:"cheapest active"};
   return null;
+}
+
+// Andika (24 Sep 2026): "make also suggestion on the side of each products like small icon that has
+// pop up that would suggest the possibility of a cheaper options (so it will give suggestion because
+// the current distribution might have been happened because of the distribution rule)" — built from
+// the same pool-selection logic already proven correct in the "which products aren't cheapest" audit
+// done earlier the same day (which found zero genuine routing bugs once produce-vs-flexible pool
+// selection was respected — see rule 50's investigation notes). Deliberately reuses poolCheapest()
+// itself (the exact function routeRow's own step 5 uses) rather than re-deriving candidate filtering
+// by hand, so this can never disagree with the real routing logic about what "cheapest active" means
+// for a given row — including produce vs flexible pool selection, disabled suppliers, per-product
+// bans, and Sunday-closure exclusions, all for free.
+function findCheaperAlternative(it){
+  if(!it || !it.rowRef || !it.supplier || it.price==null || isNaN(it.price)) return null;
+  const row = it.rowRef;
+  if(!row.prices) return null;
+  const ctx = currentCtx();
+  const pool = isProduceRow(row) ? PRODUCE_POOL : FLEXIBLE_POOL;
+  const excludeExtra = getProductBans(row.name);
+  const best = poolCheapest(row, pool, excludeExtra, ctx.dateObj);
+  if(!best || best.supplier === it.supplier || best.price == null) return null;
+  if(best.price >= it.price) return null; // already the cheapest (or tied) — nothing to suggest
+  return best;
+}
+
+// Plain-language explanation shown inside the popup for WHY the current routing isn't the cheapest
+// pool option — maps routeRow()'s own `reason` strings (see routeRow above) so the message always
+// stays in sync with the actual rule that fired, instead of a second hand-maintained copy of the
+// same logic drifting out of date. Falls back to a generic line for anything not explicitly mapped
+// (e.g. a future rule added to routeRow that this list hasn't been updated for yet).
+function cheaperAltExplanation(it){
+  const reason = it.reason || "";
+  if(reason.indexOf("locked to ")===0) return "it's locked to a specific supplier by a standing rule";
+  if(reason.indexOf("seafood")===0) return "seafood is routed through its own Rafi-vs-Ikan-Bali comparison, not the general supplier pool";
+  if(reason.indexOf("chicken")===0) return "chicken has its own dedicated supplier comparison";
+  if(reason==="locked regardless of price") return "it's hard-locked to this supplier regardless of price (a standing rule)";
+  if(reason==="named-supplier rule") return "it's locked to a specific named supplier by a standing rule";
+  if(reason==="pantry rule (regardless of price)") return "pantry items are locked to Mimba regardless of price (a standing rule)";
+  if(reason==="keyword rule") return "it's locked by a keyword rule";
+  if(reason.indexOf("bar one-supplier rule")===0) return "bar produce is bundled onto one supplier with the lowest full-coverage total, not the per-item cheapest";
+  if(reason.indexOf("redistributed")===0) return "it was redistributed here because the regular supplier fell under its minimum order amount";
+  if(reason==="manual" || reason==="manual (bulk)") return "it was manually assigned";
+  return "this is likely due to a standing distribution rule rather than a routing error";
 }
 
 // Real bug (14 Sep 2026, "Tuna steak 110-120gr 5pcs" ordering 110 instead of 5): both extractQty()
@@ -4511,6 +4565,47 @@ function openCardRedistributePopup(code){
   renderList();
 }
 
+// Andika (24 Sep 2026): popup opened by clicking a line's 💡 icon (see renderCards). Explains why
+// the current routing isn't the cheapest pool option — usually a standing rule (see
+// cheaperAltExplanation, defined near findCheaperAlternative/routeRow) — and offers a one-click
+// switch via the same reassign() the drag-and-drop and click-redistribute popup already use, so
+// switching here behaves identically (manual/locked, re-renders, etc.) to any other reassignment.
+function showCheaperAltPopup(idx){
+  const it = currentItems[idx];
+  if(!it) return;
+  const alt = findCheaperAlternative(it);
+  if(!alt) return; // stale icon click (order changed since render) — nothing to show
+  const currentLabel = nameOf(it.supplier);
+  const altLabel = nameOf(alt.supplier);
+  const qty = it.qty || 1;
+  const savingsPerUnit = it.price - alt.price;
+  const savingsTotal = savingsPerUnit * qty;
+  const explanation = cheaperAltExplanation(it);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box card-redistribute-box">
+      <div class="modal-message" style="margin-bottom:4px"><strong>Cheaper option available — ${escapeHtml(it.matched || it.label)}</strong></div>
+      <p class="hint" style="margin:0 0 10px">
+        Currently on <strong>${escapeHtml(currentLabel)}</strong> at Rp ${it.price.toLocaleString('id-ID')}.
+        <strong>${escapeHtml(altLabel)}</strong> has it for Rp ${alt.price.toLocaleString('id-ID')}
+        — about Rp ${savingsTotal.toLocaleString('id-ID')} cheaper on this line.
+      </p>
+      <p class="hint" style="margin:0 0 14px">This is most likely intentional, not a bug: ${escapeHtml(explanation)}.</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="cheaperAltCancel" type="button" style="margin-top:0">Keep as-is</button>
+        <button class="btn-primary" id="cheaperAltSwitch" type="button" style="margin-top:0">Switch to ${escapeHtml(altLabel)}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  function close(){ document.removeEventListener("keydown", onKeydown); overlay.remove(); }
+  function onKeydown(e){ if(e.key==="Escape") close(); }
+  document.addEventListener("keydown", onKeydown);
+  overlay.addEventListener("click", (e) => { if(e.target===overlay) close(); });
+  overlay.querySelector("#cheaperAltCancel").onclick = close;
+  overlay.querySelector("#cheaperAltSwitch").onclick = () => { reassign(idx, alt.supplier); close(); };
+}
+
 function toggleAllUndistributed(checkbox){
   document.querySelectorAll('.undist-check').forEach(el => { el.checked = checkbox.checked; });
 }
@@ -4634,7 +4729,17 @@ function renderCards(){
     // second trigger for it. A completed drag gesture doesn't fire a subsequent 'click' in any
     // browser, so this coexists with the card's own onclick popup-opener without needing extra
     // event suppression.
-    const lineDivs = items.map(x => `<div class="order-line-text" draggable="true" data-idx="${x.idx}" ondragstart="onOrderLineDragStart(event, ${x.idx})" ondragend="onOrderLineDragEnd(event)">${x.text}</div>`).join("");
+    // Andika (24 Sep 2026): a small 💡 icon appears on any line whose row has a genuinely cheaper
+    // active supplier than the one it's routed to (findCheaperAlternative, defined near routeRow) —
+    // clicking it opens showCheaperAltPopup, which explains WHY (usually a standing rule, not a
+    // bug) and offers a one-click switch. Its own onclick stops propagation so it doesn't also open
+    // the card's redistribute popup or interfere with the line's drag handlers.
+    const lineDivs = items.map(x => {
+      const altIcon = findCheaperAlternative(currentItems[x.idx])
+        ? `<span class="cheaper-alt-icon" title="A cheaper active supplier may be available — click for details" onclick="event.stopPropagation(); showCheaperAltPopup(${x.idx})">💡</span>`
+        : "";
+      return `<div class="order-line-text" draggable="true" data-idx="${x.idx}" ondragstart="onOrderLineDragStart(event, ${x.idx})" ondragend="onOrderLineDragEnd(event)">${x.text}${altIcon}</div>`;
+    }).join("");
     html += `<div class="card order-card" onclick="openCardRedistributePopup('${code}')" title="Click to redistribute any item on this card to a different supplier, or drag an item onto another card" ondragover="onCardDragOver(event)" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event, '${code}')">
       <h2>ORDER — ${type.toUpperCase()} &nbsp;|&nbsp; ${date}</h2>
       <h3>${supplierLabel}
