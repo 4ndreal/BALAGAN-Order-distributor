@@ -2617,9 +2617,23 @@ function routeItem(raw, ctx){
   let forcedRowName = null;
   if(n.includes("green apple") || n.includes("apel hijau")){
     forcedRowName = ctx.orderType==="Bar" ? GREEN_APPLE_BAR_ROW : GREEN_APPLE_KITCHEN_ROW;
-  } else if(n.includes("yogurt") || n.includes("yoghurt")){
+  } else if(n.includes("yogurt") || n.includes("yoghurt") || n.includes("yougurt") || n.includes("yogourt")){
+    // Andika (30 Sep 2026, "greek yougurt plain 2 pax" order): the common typo "yougurt" (letters
+    // transposed) didn't contain the literal substring "yogurt"/"yoghurt", so this kitchen/bar
+    // forced-row override never triggered - the line fell through to plain fuzzyMatch, whose typo
+    // tolerance matched it to a real row, but the WRONG one (the Bar-only Biokkul row) regardless of
+    // this being a Kitchen order. Broadened to also catch "yougurt"/"yogourt" misspellings.
     forcedRowName = ctx.orderType==="Bar" ? YOGURT_BAR_ROW : YOGURT_KITCHEN_ROW;
-  } else if(n.includes("fresh milk") || n.includes("susu segar") || n.includes("susu uht") || n.includes("milk diamond") || n.includes("susu diamond")){
+  } else if(n.includes("syrniki") || n.includes("syrniky")){
+    // Andika (22 Sep 2026, "Milk 30 L (for syrniki)" order): the ALIASES fix alone couldn't work
+    // here, because stripQuantityParens() (an established 18 Sep 2026 fix) unconditionally strips
+    // any "(for X)" parenthetical as usage-note noise before fuzzy matching ever runs — normally
+    // correct (it's built for genuine noise like "(for tartar, poke, garnish)"), but here "syrniki"
+    // wasn't describing a USE for generic milk, it was naming the specific product itself. `n` above
+    // is computed from norm(raw) directly, before that stripping happens, so it still sees the word
+    // and can force the right row the same way Green Apple/Yogurt/Fresh Milk already do.
+    forcedRowName = "Fresh Milk Syrniky / Abiseka";
+  } else if((n.includes("fresh milk") || n.includes("susu segar") || n.includes("susu uht") || n.includes("milk diamond") || n.includes("susu diamond")) && !n.includes("syrniki") && !n.includes("syrniky")){
     // Two brand-specific fresh milk rows exist (Diamond for kitchen, Greenfields for bar) — plain
     // "fresh milk" fuzzy-matched to whichever scored higher regardless of order type, silently
     // sending the wrong brand (e.g. a Bar order's "fresh milk 12 lt" landing on the Kitchen-brand
@@ -2632,16 +2646,13 @@ function routeItem(raw, ctx){
     // Diamond)" (a scoring coincidence - "kitchen" in this row's own name inflated its phrase length
     // just enough to lose to Almond Milk's shorter name, despite matching the exact same "milk"+
     // "diamond" words). Broadened to match every phrasing rule 24 actually documents.
+    // Andika (30 Sep 2026, "susu fresh milk 30 L for syrniki" order): this branch was checked BEFORE
+    // the syrniki branch below, so a line naming both ("fresh milk" + "syrniki" together) always won
+    // here first and never reached the more specific syrniki override - silently sending the whole
+    // 30L syrniki order to the generic Diamond row instead of the correct Abiseka row. Moved this
+    // branch to run AFTER the syrniki check and excluded syrniki/syrniky lines explicitly so the
+    // more specific override always wins regardless of check order going forward.
     forcedRowName = ctx.orderType==="Bar" ? FRESH_MILK_BAR_ROW : FRESH_MILK_KITCHEN_ROW;
-  } else if(n.includes("syrniki") || n.includes("syrniky")){
-    // Andika (22 Sep 2026, "Milk 30 L (for syrniki)" order): the ALIASES fix alone couldn't work
-    // here, because stripQuantityParens() (an established 18 Sep 2026 fix) unconditionally strips
-    // any "(for X)" parenthetical as usage-note noise before fuzzy matching ever runs — normally
-    // correct (it's built for genuine noise like "(for tartar, poke, garnish)"), but here "syrniki"
-    // wasn't describing a USE for generic milk, it was naming the specific product itself. `n` above
-    // is computed from norm(raw) directly, before that stripping happens, so it still sees the word
-    // and can force the right row the same way Green Apple/Yogurt/Fresh Milk already do.
-    forcedRowName = "Fresh Milk Syrniky / Abiseka";
   } else if((n.includes("prawn") || n.includes("shrimp") || n.includes("udang")) && !n.includes("tiger")){
     // Andika (24 Sep 2026, "prawn 5 kg" / "shrimp 4kg" order): rule 36 (10 Sep 2026) established that
     // a bare "Prawn" on a kitchen order always means "Prawn 15" and should default to the cheaper
