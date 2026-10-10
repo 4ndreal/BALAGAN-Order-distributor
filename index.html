@@ -728,7 +728,7 @@
   <div class="field-row">
     <label class="radio-kitchen"><input type="radio" name="orderType" value="Kitchen" checked> <span class="radio-label-text">Kitchen</span></label>
     <label class="radio-bar"><input type="radio" name="orderType" value="Bar"> <span class="radio-label-text">Bar</span></label>
-    <label class="date-label">Date: <input type="date" id="orderDatePicker" class="order-date-picker" style="width:190px" onchange="syncOrderDateFromPicker()">
+    <label class="date-label">Date: <input type="date" id="orderDatePicker" class="order-date-picker" autocomplete="off" style="width:190px" onchange="syncOrderDateFromPicker()">
       <input type="hidden" id="orderDate"></label>
   </div>
 
@@ -2183,6 +2183,26 @@ function poolCheapest(row, pool, excludeExtra, dateObj){
 function isSunday(dateObj){ return dateObj && dateObj.getDay()===0; }
 
 // Core per-row routing decision. `ctx` = {orderType, dateObj}
+// Andika (11 Oct 2026): "ribeye 1 loaf isn't distributed why is that?" - the line matched Rib Eye
+// fine, but every supplier that sells it was unavailable (Rib Eye is only priced at Scenia; with
+// Scenia switched off - on its card for today, or in the Suppliers tab - nothing is left), and the
+// pool only said "no active price". Now the reason names the supplier and what's blocking it.
+function explainNoRoute(row, ctx){
+  const priced = allSupplierCodes().filter(code => { const p = getRowPrice(row, code); return p!=null && p!==""; });
+  if(!priced.length) return `no supplier has a price for ${row.name} yet`;
+  const why = priced.map(code => {
+    const n = nameOf(code);
+    if(isSupplierDeleted(code)) return `${n} was removed`;
+    if(sessionDisabledSuppliers.has(code)) return `${n} is switched off for today's order (turn its card back on)`;
+    if(isDisabled(code)) return `${n} is turned off in the Suppliers tab`;
+    if(isBannedFrom(row.name, code)) return `${row.name} is banned from ${n} (Products tab)`;
+    if(ctx && ctx.dateObj && isClosedForDelivery(code, ctx.dateObj)) return `${n} is closed on the delivery day`;
+    return null;
+  }).filter(Boolean);
+  const lock = getProductLock(row.name);
+  if(lock && !priced.includes(lock)) why.unshift(`it's locked to ${nameOf(lock)}, which has no price for it`);
+  return why.length ? why.slice(0, 3).join("; ") : "no active price";
+}
 function routeRow(row, ctx){
   ctx = ctx || {};
   // 0. Explicit per-product supplier lock (Andika, 14 Sep 2026 - "strict rule" overrides like
@@ -2908,7 +2928,7 @@ function routeItem(raw, ctx){
   }
   const route = routeRow(row, ctx);
   if(!route){
-    return {raw, label:raw, supplier:null, price:null, confidence:"low", reason:"matched but no active price", matched:row.name};
+    return {raw, label:raw, supplier:null, price:null, confidence:"low", reason:"matched, but " + explainNoRoute(row, ctx), matched:row.name};
   }
   const label = displayLabel(row, raw);
   return {
@@ -2956,6 +2976,9 @@ const CONTAINER_UNITS = {
   "Fresh Milk Diamond (Kitchen)": { dus: 12, box: 12, karton: 12, pcs: 1, pc: 1, pack: 1, pck: 1, pax: 1, kotak: 1 },
   // Andika (6 Sep 2026): a dus of double-zero flour = 10 x 1 kg; BB/Mimba prices on this row are per kg.
   "Flour 00 / Double Zero": { dus: 10, box: 10, karton: 10 },
+  // Andika (11 Oct 2026): "tepung cakra 1 dus = 12 pcs", "tomato peeled cirio 1 dus = 6 can/pcs".
+  "Flour Cakra": { dus: 12, box: 12, karton: 12 },
+  "Canned Peeled Tomatoes (Cirio)": { dus: 6, box: 6, karton: 6 },
 };
 function billQty(it){
   const q = it.qty || 1;
@@ -3992,12 +4015,31 @@ function getSelectedOrderDate(){
   return fallback;
 }
 // default date = tomorrow
-(function(){
+// Andika (11 Oct 2026): "put the default date on our website automatically to the date for tomorrow
+// every time I open or refresh it". The page already set tomorrow on load, but browsers can put the
+// OLD value back afterwards: a refresh restores typed-in form values (Safari/Firefox), and reopening
+// a tab or going back can show the page straight from memory (back/forward cache) without running
+// load code at all - so a date picked days ago could come back. Now: autocomplete="off" on the
+// picker, tomorrow is set again on load AND on every pageshow (covers both cases), and if the page
+// has been left open past midnight, coming back to it rolls the date to the new tomorrow.
+function isoForTomorrow(){
   const d = new Date(); d.setDate(d.getDate()+1);
-  const iso = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-  document.getElementById('orderDatePicker').value = iso;
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+let orderDateSetForDay = null;
+function setOrderDateToTomorrow(){
+  const el = document.getElementById('orderDatePicker');
+  if(!el) return;
+  el.value = isoForTomorrow();
+  orderDateSetForDay = new Date().toDateString();
   syncOrderDateFromPicker();
-})();
+}
+setOrderDateToTomorrow();
+window.addEventListener('load', setOrderDateToTomorrow);
+window.addEventListener('pageshow', setOrderDateToTomorrow);
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && orderDateSetForDay !== new Date().toDateString()) setOrderDateToTomorrow();
+});
 
 /* ===================== MATRIX GRID ===================== */
 let gridInstance = null;
@@ -5240,7 +5282,7 @@ function renderCards(){
         const btns = opts.map(n => `<button class="btn-secondary" style="padding:3px 8px;font-size:12px;margin:2px" onclick="acceptSuggestion(${currentItems.indexOf(it)}, '${escapeHtml(n).replace(/'/g,"\\'")}')">✓ ${escapeHtml(n)}</button>`).join("");
         return `<span style="color:var(--danger-text)">${escapeHtml(it.reason.replace(/^check: /,""))}</span>${btns ? '<div>'+btns+'</div>' : ''}`;
       }
-      return it.matched ? it.matched+' <span class="hint">(no active price)</span>' : '<span class="hint">no match found</span>';
+      return it.matched ? it.matched+` <span class="hint">(${escapeHtml((it.reason||"no active price").replace(/^matched, but /,""))})</span>` : '<span class="hint">no match found</span>';
     };
     const rows = unmatched.map(({it, idx}) => `<tr>
       <td><input type="checkbox" class="undist-check" data-idx="${idx}"></td>
