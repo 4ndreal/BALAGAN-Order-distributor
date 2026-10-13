@@ -2049,6 +2049,15 @@ function siblingSizeOverride(row, text){
 // looser version of this override wrongly redirected "vanilli 1botol" away from the correct Vanilla
 // Essence Koepoe-Koepoe match onto "Vanilla Syrup (Stir Up) 700ml" just because both happen to start
 // with "vanilla", even though Vanilla Essence is normally, legitimately ordered by the bottle too.
+// Andika (12 Oct 2026 bar order): "red Chery 1 botol" landed on Cherry Red Tomato. A cherry by the
+// bottle/jar is the cocktail (maraschino) cherry the bar uses, never fresh cherry tomatoes.
+function cherryBottleOverride(row, text){
+  if(!row || !/cherry tomato|tomato/i.test(row.name)) return row;
+  const t = (text||"").toLowerCase();
+  if(!/\bcher+y\b|\bchery\b/.test(t) || /tomat/.test(t)) return row;
+  if(!/\d+\s*(botol|btl|bottle|jar|toples)\b/.test(t)) return row;
+  return MATRIX.find(m => m.name==="Cherry Bottle") || row;
+}
 function botolMeansSyrup(row, text){
   if(!row) return row;
   if(/syrup/i.test(row.name)) return row;
@@ -2196,7 +2205,9 @@ function explainNoRoute(row, ctx){
     if(sessionDisabledSuppliers.has(code)) return `${n} is switched off for today's order (turn its card back on)`;
     if(isDisabled(code)) return `${n} is turned off in the Suppliers tab`;
     if(isBannedFrom(row.name, code)) return `${row.name} is banned from ${n} (Products tab)`;
-    if(ctx && ctx.dateObj && isClosedForDelivery(code, ctx.dateObj)) return `${n} is closed on the delivery day`;
+    // Andika (11 Oct 2026): "it's because scenia is closed on sunday. can we instead make those
+    // notification that if a supplier is off on sunday it says it there?"
+    if(ctx && ctx.dateObj && isClosedForDelivery(code, ctx.dateObj)) return `${n} is closed on Sundays and the delivery date is a Sunday (change the date, or untick "Closed Sunday" for ${n} in the Suppliers tab)`;
     return null;
   }).filter(Boolean);
   const lock = getProductLock(row.name);
@@ -2899,6 +2910,7 @@ function routeItem(raw, ctx){
     // needs to be re-applied here too, against the real `raw` text, for it to actually reach
     // distribute()'s real order-routing path (not just fuzzyMatch()/learnedAwareMatch() in isolation).
     row = botolMeansSyrup(row, raw);
+    { const before = row; row = cherryBottleOverride(row, raw); if(row !== before) deterministic = true; }
     // Andika (20 Sep 2026, "Tomato chry k 700 gr" order): same reasoning - inlineColorLetterOverride()
     // needs to be re-applied here too, against the real `raw` text, to actually reach distribute()'s
     // real order-routing path.
@@ -2917,7 +2929,7 @@ function routeItem(raw, ctx){
     const a = assessMatch(raw, row);
     // a tie-break pick still goes through the same line-reading rules (botol = syrup, size in
     // parens, inline colour letter, loaf = loin) so it can never undo one of them
-    if(a.row) row = loafMeansLoin(inlineColorLetterOverride(botolMeansSyrup(siblingSizeOverride(a.row, raw), raw), raw), raw);
+    if(a.row) row = loafMeansLoin(inlineColorLetterOverride(cherryBottleOverride(botolMeansSyrup(siblingSizeOverride(a.row, raw), raw), raw), raw), raw);
     if(a.doubtful){
       const sug = routeRow(row, ctx);
       return {raw, label:raw, supplier:null, price:null, confidence:"check", reason:"check: "+a.why,
@@ -2992,7 +3004,9 @@ function billQty(it){
     if(/^(kg|kgs|kilo|gr|g|gram|grams|ons)$/.test(ou) && !/^kg$/i.test((row.unit||"").trim())){
       const ru = rowPriceUnit(row);
       const packKg = (ru.base==="kg" && ru.size!==1) ? ru.size
-        : (/^(pcs|pc|pack|pax|pck|btl|can|jar)$/i.test((row.unit||"").trim()) && row.packSize && row.packSize!==1 && row.packSize<50) ? row.packSize : null;
+        : (/^(pcs|pc|pack|pax|pck|btl|can|jar)$/i.test((row.unit||"").trim()) && row.packSize && row.packSize!==1 && row.packSize<50) ? row.packSize
+        // pack weight written in the product name ("Santan Bubuk (Sasa) 500gr": "1 kg" = 2 packs) - 14 Oct 2026
+        : (/^(pcs|pc|pack|pax|pck|btl|can|jar)$/i.test((row.unit||"").trim()) && portionKgOf(row)) ? portionKgOf(row) : null;
       if(packKg) return {q: q / packKg, packs: q / packKg};
     }
   }
@@ -5173,6 +5187,17 @@ function renderCards(){
     if(qtyFlagged.length){
       const lines = qtyFlagged.map(it => `${it.matched||it.raw} → ${nameOf(it.supplier)} (was ${it.qtyOriginal}kg, now ${it.qty}kg)`).join(" · ");
       html += `<div class="flag" style="background:var(--danger-bg);border-left-color:var(--danger-border)"><strong style="color:var(--danger-text)">⚠ Quantity auto-corrected:</strong> ${lines} — looked like grams typed/read as kilograms, so it was converted. Fix the text (✎ in the item table above) if the original amount was actually correct.</div>`;
+    }
+  }
+  // Sunday delivery: say up front which suppliers are closed, and which lines that affected.
+  {
+    const dt = getSelectedOrderDate();
+    if(isSunday(dt)){
+      const closed = allSupplierCodes().filter(code => !isDisabled(code) && getClosedSunday(code));
+      if(closed.length){
+        const hit = currentItems.filter(it => /closed on Sundays|closed Sunday/i.test(it.reason||"")).map(it => it.matched || it.raw);
+        html += `<div class="flag" style="background:var(--danger-bg);border-left-color:var(--danger-border)"><strong style="color:var(--danger-text)">Sunday delivery:</strong> closed on Sundays - ${closed.map(c => escapeHtml(nameOf(c))).join(", ")}.${hit.length ? ` Affected: ${hit.map(escapeHtml).join(", ")}.` : ""} Change the date above if this order isn't for Sunday.</div>`;
+      }
     }
   }
   if(unmatched.length){
