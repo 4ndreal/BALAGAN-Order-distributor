@@ -1660,7 +1660,7 @@ function showPrompt(message, defaultValue){ return showModal({message, type:"pro
 // accidentally strip a meaningful size/grade that's actually part of the product, like "Prawn 15".
 function stripQtyForMatch(text){
   return (text||"")
-    .replace(/\d+(?:[.,]\d+)?\s*(kg|gram|gr|g|pcs|pc|liter|ltr|l|botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket|buah|ikat|butir|ekor|lembar|ml)\b/gi, " ")
+    .replace(/\d+(?:[.,]\d+)?\s*(kg|gram|gr|g|pcs|pc|liter|ltr|l|botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket|buah|ikat|butir|ekor|lembar|ml|port|portion|porsi|biji|block|blok)\b/gi, " ")
     .replace(/[-*•]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -1823,7 +1823,7 @@ const GENERIC_QUALIFIER_WORDS = new Set(["steak"]);
 // extractQtyMatch) - a top-level const's initializer runs immediately at script-load time, so
 // reaching for a not-yet-declared later const here would throw a TDZ ReferenceError and break the
 // whole page on load, the exact same failure class as the 14 Sep 2026 distribute-button TDZ bug.
-const COUNT_UNIT_RE = /\d+(?:[.,]\d+)?\s*(?:botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket|pcs|pc)\b/gi;
+const COUNT_UNIT_RE = /\d+(?:[.,]\d+)?\s*(?:botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket|pcs|pc|port|portion|porsi)\b/gi; // port/porsi added 17 Oct 2026 ("Mahai - mahi 10 port")
 function stripCountUnitsForMatch(text){ return (text||"").replace(COUNT_UNIT_RE, " "); }
 function fuzzyMatch(text){
   if(!SEARCH_INDEX) buildSearchIndex();
@@ -1941,7 +1941,10 @@ const MATCH_IGNORE_WORDS = new Set([
   "kaleng","loaf","port","portion","porsi","ikat","ekor","lembar","sachet","roll","bks","bungkus","tray","bucket",
   "jerigen","blok","block","pc","pk",
   "and","dan","for","untuk","utk","buat","the","with","please","tolong","minta","pakai","yang",
-  "fresh","segar","matang","ripe","leaves","leave","leaf","daun","cheese","keju"
+  "fresh","segar","matang","ripe","leaves","leave","leaf","daun","cheese","keju",
+  // 17 Oct 2026 ("ediber flower red cabbge 2 kotak"): "edible flower" is how the kitchen labels the
+  // whole Krop Nation group, not part of any one product's name
+  "edible","ediber","edibel","eatable","flower","flowers"
 ]);
 function matchWordCovered(w, pwords, phraseCollapsed){
   for(const pw of pwords){
@@ -1990,8 +1993,10 @@ function entryMissing(words, entry){
   return words.filter(w => !entry.phrases.some(p => {
     const pc = p.replace(/ /g,"");
     if(matchWordCovered(w, p.split(" ").filter(Boolean), pc)) return true;
-    // the whole line typed as one fused/typo'd phrase ("ice breg" vs "iceberg")
-    return wc.length>=6 && Math.abs(wc.length - pc.length) <= 2 && wc[0]===pc[0] && editDistance(wc, pc) <= 2;
+    // the whole line typed as one fused/typo'd phrase ("ice breg" vs "iceberg"; "read cabage" vs
+    // "red cabbage" once ignorable words like "edible" are set aside on both sides)
+    const pcw = phraseWordsOf(p).join("");
+    return [pc, pcw].some(x => x && wc.length>=6 && Math.abs(wc.length - x.length) <= 2 && wc[0]===x[0] && editDistance(wc, x) <= 2);
   }));
 }
 // True when one name/alias of this entry says exactly what the line says (both directions, typo-
@@ -4421,6 +4426,8 @@ function distribute(){
     if(/\d/.test(r)){ orderLines.push(r); return; }
     const sectionWords = norm(r).split(" ").filter(Boolean);
     if(sectionWords.length && sectionWords.every(w => SECTION_HEADING_WORDS.has(w))){ ignoredHeaders.push(r.trim()); return; }
+    // an order title with typos / words run together ("Lits orderkitchen", "orderan bar") - 17 Oct 2026
+    if(/order|pesanan/i.test(r)){ ignoredHeaders.push(r.trim()); return; }
     const probe = routeItem(r, ctx);
     if(!probe.supplier && !probe.matched && !probe.suggested){ ignoredHeaders.push(r.trim()); return; }
     noQtyItems.set(orderLines.length, probe);
