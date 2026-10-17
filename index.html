@@ -1944,7 +1944,8 @@ const MATCH_IGNORE_WORDS = new Set([
   "fresh","segar","matang","ripe","leaves","leave","leaf","daun","cheese","keju",
   // 17 Oct 2026 ("ediber flower red cabbge 2 kotak"): "edible flower" is how the kitchen labels the
   // whole Krop Nation group, not part of any one product's name
-  "edible","ediber","edibel","eatable","flower","flowers"
+  "edible","ediber","edibel","eatable","flower","flowers",
+  "jrigen","jirigen","jerigen","jerrigen","jerrygen","jerrycan","jerycan"
 ]);
 function matchWordCovered(w, pwords, phraseCollapsed){
   for(const pw of pwords){
@@ -2530,7 +2531,7 @@ function stripSizeRanges(text){
 // previously they were two independently-maintained copies of the same regex.
 // Andika (8 Oct 2026): "oil 18L 1 jerigen" read qty 18 from the product's own size - jerigen and the
 // other container/count words added so the real count wins over a size number in the product name.
-const QTY_COUNT_UNITS = "botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket|pcs|pc|port|portion|porsi|jerigen|jrg|galon|buah|biji|butir|ikat|ekor|bks|bungkus|blok|block|box|pck";
+const QTY_COUNT_UNITS = "botol|btl|pax|dus|krat|sisir|pack|kotak|loaf|can|bucket|pcs|pc|port|portion|porsi|jerigen|jrigen|jirigen|jerrigen|jerrygen|jerrycan|jrg|galon|buah|biji|butir|ikat|ekor|bks|bungkus|blok|block|box|pck";
 function extractQtyMatch(raw){
   // Andika (8 Oct 2026, "ice berg 1, 5 kg" read as qty 1): a decimal comma typed with a stray space
   // after it ("1, 5 kg" = 1,5 kg) was split into two numbers, so only the "1" was taken. Close the
@@ -2904,6 +2905,10 @@ function looksLikeNonProductLine(line){
   const t = String(line||"").trim();
   if(!t) return true;
   if(isAllTitleWords(t)) return true;
+  // 18 Oct 2026: "lits order tgl 18 /10/26" - an order title with a typo and a spaced-out date slipped
+  // past the title patterns and became a product line with qty 18. A line mentioning "order" /
+  // "pesanan" that carries a date (d/m, d-m, d.m, spaces allowed) is the title.
+  if(/\border(an)?\b|\bpesanan\b/i.test(t) && /\b\d{1,2}\s*[\/\-.]\s*\d{1,2}\b/.test(t)) return true;
   return NON_PRODUCT_LINE_PATTERNS.some(re => re.test(t));
 }
 
