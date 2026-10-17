@@ -3059,7 +3059,14 @@ function routeItem(raw, ctx){
     route = {supplier: alt.supplier, price: alt.price, locked: true, reason: `brand on the line: ${askedBrand}`};
   }
   if(!route){
-    return {raw, label:raw, supplier:null, price:null, confidence:"low", reason:"matched, but " + explainNoRoute(row, ctx), matched:row.name};
+    // Andika (18 Oct 2026): "add use this supplier anyway button" - suppliers that have a price and
+    // are blocked ONLY by a closed day (closed Sunday / day off), offered as one-click overrides.
+    const closedOnly = allSupplierCodes().filter(code => {
+      const p = getRowPrice(row, code);
+      return p!=null && p!=="" && !isDisabled(code) && !isBannedFrom(row.name, code) && ctx && ctx.dateObj && isClosedForDelivery(code, ctx.dateObj);
+    }).map(code => ({code, price: +getRowPrice(row, code)}));
+    return {raw, label:raw, supplier:null, price:null, confidence:"low", reason:"matched, but " + explainNoRoute(row, ctx), matched:row.name,
+      rowRef: row, closedOnlySuppliers: closedOnly};
   }
   let label = displayLabel(row, raw);
   // a card label that names the product's usual brand ("Parmesan Block (Anchor) 800gr") must show
@@ -5083,6 +5090,17 @@ async function editItemRaw(idx){
   renderCards();
 }
 
+// One-click override for a line blocked only because its supplier is closed on the delivery date.
+// Only this order line is affected - the closed-Sunday / day-off settings stay as they are.
+function useSupplierAnyway(idx, code){
+  const it = currentItems[idx];
+  if(!it || !code) return;
+  reassign(idx, code);
+  it.reason = `${nameOf(code)} used anyway (closed on the delivery date)`;
+  it.closedOnlySuppliers = null;
+  renderParsed();
+  renderCards();
+}
 function reassign(idx, supplier){
   const it = currentItems[idx];
   it.supplier = supplier || null;
@@ -5450,7 +5468,8 @@ function renderCards(){
         const btns = opts.map(n => `<button class="btn-secondary" style="padding:3px 8px;font-size:12px;margin:2px" onclick="acceptSuggestion(${currentItems.indexOf(it)}, '${escapeHtml(n).replace(/'/g,"\\'")}')">✓ ${escapeHtml(n)}</button>`).join("");
         return `<span style="color:var(--danger-text)">${escapeHtml(it.reason.replace(/^check: /,""))}</span>${btns ? '<div>'+btns+'</div>' : ''}`;
       }
-      return it.matched ? it.matched+` <span class="hint">(${escapeHtml((it.reason||"no active price").replace(/^matched, but /,""))})</span>` : '<span class="hint">no match found</span>';
+      const anyway = (it.closedOnlySuppliers||[]).map(s => `<button class="btn-secondary" style="padding:3px 8px;font-size:12px;margin:2px" title="Send to ${escapeHtml(nameOf(s.code))} even though it's marked closed on the delivery date (only for this order)" onclick="useSupplierAnyway(${currentItems.indexOf(it)}, '${escapeHtml(s.code)}')">Use ${escapeHtml(nameOf(s.code))} anyway (Rp ${s.price.toLocaleString('id-ID')})</button>`).join("");
+      return it.matched ? it.matched+` <span class="hint">(${escapeHtml((it.reason||"no active price").replace(/^matched, but /,""))})</span>${anyway ? '<div>'+anyway+'</div>' : ''}` : '<span class="hint">no match found</span>';
     };
     const rows = unmatched.map(({it, idx}) => `<tr>
       <td><input type="checkbox" class="undist-check" data-idx="${idx}"></td>
