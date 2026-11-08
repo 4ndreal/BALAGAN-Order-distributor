@@ -245,6 +245,9 @@
                  transition: background .15s, transform .1s, box-shadow .15s; }
   .btn-primary:hover { background:var(--accent-active); transform:translateY(-1px) scale(1.05); box-shadow:0 4px 12px rgba(37,211,102,0.38); }
   .btn-primary:active { background:var(--accent-active); transform:translateY(0) scale(1); }
+  /* 6 Nov 2026 (iPhone/iPad): no hover animation on touch screens, no double-tap-to-zoom delay on buttons */
+  button, .btn-primary, .btn-secondary, label, input[type=radio], input[type=checkbox] { touch-action: manipulation; }
+  @media (hover: none) { .btn-primary:hover { transform:none; box-shadow:none; background:var(--accent); } }
   .btn-secondary { background:var(--btn2-bg); color:var(--btn2-text); border:1px solid var(--border); border-radius:var(--radius-sm);
                    padding:7px 14px; font-size:13px; margin-left:8px; transition: background .15s, border-color .15s, transform .12s; }
   .btn-secondary:hover { background:var(--btn2-hover); border-color:var(--text-faint); transform:scale(1.05); }
@@ -755,8 +758,9 @@
   </div>
 
   <textarea id="rawInput" placeholder="Baby Potato 1 kg&#10;Kentang Baby 1 kg&#10;Jeruk Kintamani 6 kg&#10;..."></textarea>
+  <div id="distributeStatus" class="hint" style="margin:6px 0 4px;min-height:1.2em" aria-live="polite"></div>
   <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-    <button class="btn-primary" id="distributeBtn" onclick="distribute()">Distribute</button>
+    <button class="btn-primary" id="distributeBtn" type="button" onclick="runDistribute()">Distribute</button>
     <button class="btn-secondary" onclick="document.getElementById('rawInput').value='';document.getElementById('results').innerHTML='';document.getElementById('parsedWrap').innerHTML='';">Clear</button>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);cursor:pointer">
       <input type="checkbox" id="useMatrixNamesToggle" onchange="onUseMatrixNamesToggle(this.checked)">
@@ -3313,7 +3317,10 @@ function lineAmount(it){
 function applyThresholds(items, ctx){
   // Only affects items that were routed via the flexible produce pool (not locked items)
   function subtotal(supplier){
-    return items.filter(it=>it.supplier===supplier && !it.locked)
+    // 8 Nov 2026: count EVERY line already going to this supplier (locked ones too). Pear putih was
+    // moved off Buk Bunga as "under 200k" although Buk Bunga was also getting a 275k Anchor parmesan
+    // block (brand-locked), so its real order was 335k. Only unlocked lines are ever moved away.
+    return items.filter(it=>it.supplier===supplier)
       .reduce((sum,it)=> sum + lineAmount(it), 0);
   }
   // Generic minimum-order check for every flexible-pool supplier (configurable per supplier
@@ -4536,6 +4543,40 @@ const SECTION_HEADING_WORDS = new Set(["sayur","sayuran","buah","buahan","fruit"
   "bread","pantry","grocery","groceries","sauce","sauces","cheese","cheeses","spice","spices","edible","flower","flowers","drink",
   "drinks","minuman","beverage","beverages","bar","kitchen","poultry","chicken","beef","pork","produce","others","other","lain","lainnya",
   "and","dan","stuff","item","items","list","sembako","packaging","cleaning","supplies","takeaway","protein","proteins","fruits","fresh"]);
+// 6 Nov 2026 (iPhone/iPad Safari - "the distribution button didn't process"): the button now says
+// what happened right under it - how many lines went to how many suppliers - and on a narrow screen
+// scrolls down to the cards (on a phone they appear far below the order box, easy to miss). If
+// anything fails, the reason is shown right there instead of the button seeming to do nothing.
+const SITE_VERSION = "6 Nov 2026";
+function runDistribute(){
+  const st = document.getElementById('distributeStatus');
+  const btn = document.getElementById('distributeBtn');
+  if(st){ st.style.color = ""; st.textContent = "Distributing…"; }
+  if(btn) btn.disabled = true;
+  // let the "Distributing…" text paint first (big orders take a moment on a phone)
+  setTimeout(() => {
+    try {
+      distribute();
+      const items = (typeof currentItems !== "undefined" && currentItems) ? currentItems : [];
+      const sups = new Set(items.filter(i => i.supplier).map(i => i.supplier));
+      const waiting = items.filter(i => !i.supplier).length;
+      if(st) st.textContent = items.length
+        ? `Done: ${items.length} line(s) → ${sups.size} supplier card(s)` + (waiting ? `, ${waiting} waiting for you to check` : "") + ". Cards are below ↓"
+        : "Nothing to distribute - paste the order list in the box above first.";
+      const res = document.getElementById('results');
+      if(items.length && res && res.getBoundingClientRect){
+        const r = res.getBoundingClientRect();
+        if(r.top > window.innerHeight * 0.6 && res.scrollIntoView) res.scrollIntoView({behavior: "smooth", block: "start"});
+      }
+    } catch(e){
+      if(st){ st.style.color = "var(--danger-text, #b00020)"; st.textContent = "Distribute failed (version " + SITE_VERSION + "): " + (e && e.message ? e.message : e) + " - please screenshot this and send it to Andika."; }
+      console.error(e);
+    } finally {
+      if(btn) btn.disabled = false;
+    }
+  }, 30);
+}
+{ const s = document.getElementById('distributeStatus'); if(s && !s.textContent) s.textContent = "Website version " + SITE_VERSION; }
 function distribute(){
   buildSearchIndex();
   const type = document.querySelector('input[name=orderType]:checked').value;
